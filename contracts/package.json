@@ -1,0 +1,9 @@
+{
+  "name": "anonymous-airdrop",
+  "version": "1.0.0",
+  "description": "Anonymous ERC20 Airdrop using RISC Zero",
+  "dependencies": {
+    "@risc0/contracts": "github:risc0/risc0-ethereum/contracts",
+    "@openzeppelin/contracts": "^5.0.0"
+  }
+}

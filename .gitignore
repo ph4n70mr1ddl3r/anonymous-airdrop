@@ -1,0 +1,13 @@
+.env
+*.json
+!package.json
+!tsconfig.json
+target/
+contracts/lib/
+contracts/out/
+contracts/cache/
+contracts/broadcast/
+*.log
+build.log
+merkle_tree.json
+claim_proof.json
