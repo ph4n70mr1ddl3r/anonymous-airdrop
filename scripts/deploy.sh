@@ -78,12 +78,14 @@ if [ -z "${ELIGIBLE_CSV:-}" ]; then
 fi
 
 AMOUNT_PER_CLAIM="${AMOUNT_PER_CLAIM:-1000000000000000000}"
+CLAIM_DEADLINE="${CLAIM_DEADLINE:-0}"
 
 echo "Verifier: $VERIFIER_ADDRESS"
 echo "Image ID: $IMAGE_ID"
 echo "Token: $TOKEN_ADDRESS"
 echo "Merkle Root: $MERKLE_ROOT"
 echo "Amount Per Claim: $AMOUNT_PER_CLAIM"
+echo "Claim Deadline: $CLAIM_DEADLINE (0 = no deadline)"
 echo ""
 
 DEPLOY_OUTPUT=$(forge create src/AnonymousAirdrop.sol:AnonymousAirdrop \
@@ -95,6 +97,7 @@ DEPLOY_OUTPUT=$(forge create src/AnonymousAirdrop.sol:AnonymousAirdrop \
         "$TOKEN_ADDRESS" \
         "$MERKLE_ROOT" \
         "$AMOUNT_PER_CLAIM" \
+        "$CLAIM_DEADLINE" \
     --json)
 
 CONTRACT_ADDRESS=$(echo "$DEPLOY_OUTPUT" | jq -r '.deployedTo')

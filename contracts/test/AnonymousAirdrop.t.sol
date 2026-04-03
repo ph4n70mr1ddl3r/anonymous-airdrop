@@ -15,6 +15,7 @@ contract AnonymousAirdropTest is Test {
     bytes32 imageId;
     bytes32 merkleRoot;
     uint256 amountPerClaim = 1000 * 10**18;
+    uint256 claimDeadline = 0;
 
     address owner = address(0x1);
     address claimant = address(0x2);
@@ -25,7 +26,7 @@ contract AnonymousAirdropTest is Test {
         token = new ERC20Mock("AirdropToken", "ADT", owner, 1000000 * 10**18);
 
         mockVerifier = IRiscZeroVerifier(address(new MockVerifier()));
-        imageId = bytes32(0);
+        imageId = bytes32(uint256(1));
         merkleRoot = bytes32(0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef);
 
         airdrop = new AnonymousAirdrop(
@@ -33,7 +34,8 @@ contract AnonymousAirdropTest is Test {
             imageId,
             IERC20(address(token)),
             merkleRoot,
-            amountPerClaim
+            amountPerClaim,
+            claimDeadline
         );
 
         token.transfer(address(airdrop), 100000 * 10**18);
@@ -46,6 +48,7 @@ contract AnonymousAirdropTest is Test {
         assertEq(airdrop.amountPerClaim(), amountPerClaim);
         assertFalse(airdrop.claimsActive());
         assertEq(airdrop.owner(), owner);
+        assertEq(airdrop.claimDeadline(), 0);
     }
 
     function testStartClaims() public {
@@ -280,7 +283,20 @@ contract AnonymousAirdropTest is Test {
             imageId,
             IERC20(address(token)),
             merkleRoot,
-            amountPerClaim
+            amountPerClaim,
+            claimDeadline
+        );
+    }
+
+    function testCannotDeployWithZeroImageId() public {
+        vm.expectRevert("zero image ID");
+        new AnonymousAirdrop(
+            mockVerifier,
+            bytes32(0),
+            IERC20(address(token)),
+            merkleRoot,
+            amountPerClaim,
+            claimDeadline
         );
     }
 
@@ -291,7 +307,20 @@ contract AnonymousAirdropTest is Test {
             imageId,
             IERC20(address(0)),
             merkleRoot,
-            amountPerClaim
+            amountPerClaim,
+            claimDeadline
+        );
+    }
+
+    function testCannotDeployWithZeroMerkleRoot() public {
+        vm.expectRevert("zero merkle root");
+        new AnonymousAirdrop(
+            mockVerifier,
+            imageId,
+            IERC20(address(token)),
+            bytes32(0),
+            amountPerClaim,
+            claimDeadline
         );
     }
 
@@ -302,6 +331,200 @@ contract AnonymousAirdropTest is Test {
             imageId,
             IERC20(address(token)),
             merkleRoot,
+            0,
+            claimDeadline
+        );
+    }
+
+    function testCannotEmergencyWithdrawToZeroAddress() public {
+        vm.prank(owner);
+        vm.expectRevert("zero withdraw address");
+        airdrop.emergencyWithdraw(address(0));
+    }
+
+    function testCannotClaimAsNonClaimant() public {
+        vm.prank(owner);
+        airdrop.startClaims();
+
+        bytes32 nullifier = keccak256("test-nullifier");
+        bytes20 claimant20 = bytes20(uint160(claimant));
+
+        GuestOutput memory output = GuestOutput({
+            merkleRoot: merkleRoot,
+            nullifier: nullifier,
+            claimantAddress: claimant20
+        });
+
+        bytes memory journal = abi.encode(output);
+        bytes memory seal = "";
+
+        vm.expectRevert("Not claimant");
+        vm.prank(nonOwner);
+        airdrop.claim(seal, journal, nullifier);
+    }
+
+    function testCannotClaimWithZeroClaimantAddress() public {
+        vm.prank(owner);
+        airdrop.startClaims();
+
+        bytes32 nullifier = keccak256("test-nullifier");
+
+        GuestOutput memory output = GuestOutput({
+            merkleRoot: merkleRoot,
+            nullifier: nullifier,
+            claimantAddress: bytes20(address(0))
+        });
+
+        bytes memory journal = abi.encode(output);
+        bytes memory seal = "";
+
+        vm.expectRevert("zero claimant address");
+        airdrop.claim(seal, journal, nullifier);
+    }
+
+    function testCannotEmergencyWithdrawWithNoTokens() public {
+        vm.prank(owner);
+        airdrop.startClaims();
+        vm.prank(owner);
+        airdrop.pauseClaims();
+
+        vm.prank(owner);
+        IERC20(address(token)).transfer(address(0x4), token.balanceOf(address(airdrop)));
+
+        vm.expectRevert("No tokens to withdraw");
+        vm.prank(owner);
+        airdrop.emergencyWithdraw(address(this));
+    }
+}
+
+contract AnonymousAirdropDeadlineTest is Test {
+    AnonymousAirdrop public airdrop;
+    ERC20Mock public token;
+
+    IRiscZeroVerifier mockVerifier;
+    bytes32 imageId;
+    bytes32 merkleRoot;
+    uint256 amountPerClaim = 1000 * 10**18;
+    uint256 claimDeadline;
+
+    address owner = address(0x1);
+    address claimant = address(0x2);
+
+    function setUp() public {
+        claimDeadline = block.timestamp + 30 days;
+
+        vm.startPrank(owner);
+        token = new ERC20Mock("AirdropToken", "ADT", owner, 1000000 * 10**18);
+
+        mockVerifier = IRiscZeroVerifier(address(new MockVerifier()));
+        imageId = bytes32(uint256(1));
+        merkleRoot = bytes32(0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef);
+
+        airdrop = new AnonymousAirdrop(
+            mockVerifier,
+            imageId,
+            IERC20(address(token)),
+            merkleRoot,
+            amountPerClaim,
+            claimDeadline
+        );
+
+        token.transfer(address(airdrop), 100000 * 10**18);
+        vm.stopPrank();
+    }
+
+    function testDeadlineSet() public {
+        assertEq(airdrop.claimDeadline(), claimDeadline);
+    }
+
+    function testCanClaimBeforeDeadline() public {
+        vm.prank(owner);
+        airdrop.startClaims();
+
+        bytes32 nullifier = keccak256("test-nullifier");
+        bytes20 claimant20 = bytes20(uint160(claimant));
+
+        GuestOutput memory output = GuestOutput({
+            merkleRoot: merkleRoot,
+            nullifier: nullifier,
+            claimantAddress: claimant20
+        });
+
+        bytes memory journal = abi.encode(output);
+        bytes memory seal = "";
+
+        vm.prank(claimant);
+        airdrop.claim(seal, journal, nullifier);
+
+        assertEq(token.balanceOf(claimant), amountPerClaim);
+    }
+
+    function testCannotClaimAfterDeadline() public {
+        vm.prank(owner);
+        airdrop.startClaims();
+
+        vm.warp(claimDeadline + 1);
+
+        bytes32 nullifier = keccak256("test-nullifier");
+        bytes20 claimant20 = bytes20(uint160(claimant));
+
+        GuestOutput memory output = GuestOutput({
+            merkleRoot: merkleRoot,
+            nullifier: nullifier,
+            claimantAddress: claimant20
+        });
+
+        bytes memory journal = abi.encode(output);
+        bytes memory seal = "";
+
+        vm.expectRevert("Claim period ended");
+        vm.prank(claimant);
+        airdrop.claim(seal, journal, nullifier);
+    }
+
+    function testCanClaimExactlyAtDeadline() public {
+        vm.prank(owner);
+        airdrop.startClaims();
+
+        vm.warp(claimDeadline);
+
+        bytes32 nullifier = keccak256("test-nullifier");
+        bytes20 claimant20 = bytes20(uint160(claimant));
+
+        GuestOutput memory output = GuestOutput({
+            merkleRoot: merkleRoot,
+            nullifier: nullifier,
+            claimantAddress: claimant20
+        });
+
+        bytes memory journal = abi.encode(output);
+        bytes memory seal = "";
+
+        vm.prank(claimant);
+        airdrop.claim(seal, journal, nullifier);
+
+        assertEq(token.balanceOf(claimant), amountPerClaim);
+    }
+
+    function testCannotDeployWithPastDeadline() public {
+        vm.expectRevert("deadline must be future or zero");
+        new AnonymousAirdrop(
+            mockVerifier,
+            imageId,
+            IERC20(address(token)),
+            merkleRoot,
+            amountPerClaim,
+            block.timestamp - 1
+        );
+    }
+
+    function testCanDeployWithZeroDeadline() public {
+        new AnonymousAirdrop(
+            mockVerifier,
+            imageId,
+            IERC20(address(token)),
+            merkleRoot,
+            amountPerClaim,
             0
         );
     }

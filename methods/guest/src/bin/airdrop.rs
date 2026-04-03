@@ -92,13 +92,17 @@ fn main() {
         panic!("zero private key");
     }
 
+    assert!(
+        input.airdrop_contract != [0u8; 20],
+        "airdrop contract cannot be zero"
+    );
+    assert!(input.chain_id > 0, "chain ID must be non-zero");
+
     let secret_key = SecretKey::from_slice(&input.private_key_bytes).expect("invalid private key");
 
     let eligible_address = derive_ethereum_address(&secret_key);
 
-    let mut leaf_hash_input = [0u8; 20];
-    leaf_hash_input.copy_from_slice(&eligible_address);
-    let leaf_hash = Sha256::new().chain_update(&leaf_hash_input).finalize();
+    let leaf_hash = Sha256::new().chain_update(&eligible_address).finalize();
     let mut leaf = [0u8; 32];
     leaf.copy_from_slice(&leaf_hash);
 
@@ -123,11 +127,9 @@ fn main() {
         input.chain_id,
     );
 
-    let output = GuestOutput {
-        merkle_root: input.merkle_root,
-        nullifier,
-        claimant_address: input.claimant_address,
-    };
-
-    env::commit(&output);
+    let mut journal = [0u8; 96];
+    journal[0..32].copy_from_slice(&input.merkle_root);
+    journal[32..64].copy_from_slice(&nullifier);
+    journal[64..84].copy_from_slice(&input.claimant_address);
+    env::commit_slice(&journal);
 }

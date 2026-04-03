@@ -46,6 +46,23 @@ pub struct ClaimProof {
     pub claimant_address: [u8; 20],
 }
 
+fn decode_journal_output(journal_bytes: &[u8]) -> Result<GuestOutput> {
+    anyhow::ensure!(
+        journal_bytes.len() == 96,
+        "Invalid journal: expected 96 bytes, got {}",
+        journal_bytes.len()
+    );
+    anyhow::ensure!(
+        journal_bytes[84..96].iter().all(|&b| b == 0),
+        "Invalid journal: non-zero padding bytes"
+    );
+    Ok(GuestOutput {
+        merkle_root: journal_bytes[0..32].try_into()?,
+        nullifier: journal_bytes[32..64].try_into()?,
+        claimant_address: journal_bytes[64..84].try_into()?,
+    })
+}
+
 fn sha256_pair(left: &[u8; 32], right: &[u8; 32]) -> [u8; 32] {
     let mut hasher = Sha256::new();
     hasher.update(left);
@@ -104,7 +121,18 @@ pub fn build_merkle_tree(leaves: &[[u8; 32]]) -> (Vec<Vec<[u8; 32]>>, [u8; 32]) 
     (tree, root)
 }
 
-pub fn get_merkle_proof(tree: &[Vec<[u8; 32]>], index: u64) -> MerkleProof {
+pub fn get_merkle_proof(tree: &[Vec<[u8; 32]>], index: u64) -> Result<MerkleProof> {
+    if tree.is_empty() || tree[0].is_empty() {
+        anyhow::bail!("Cannot generate Merkle proof for empty tree");
+    }
+    if index as usize >= tree[0].len() {
+        anyhow::bail!(
+            "Index {} out of bounds (tree has {} leaves)",
+            index,
+            tree[0].len()
+        );
+    }
+
     let leaf = tree[0][index as usize];
     let mut path = [[0u8; 32]; MERKLE_TREE_DEPTH];
     let mut current_index = index;
@@ -126,7 +154,7 @@ pub fn get_merkle_proof(tree: &[Vec<[u8; 32]>], index: u64) -> MerkleProof {
         current_index /= 2;
     }
 
-    MerkleProof { leaf, path, index }
+    Ok(MerkleProof { leaf, path, index })
 }
 
 pub fn parse_csv(csv_path: &PathBuf) -> Result<Vec<([u8; 20], u64)>> {
@@ -191,12 +219,29 @@ pub fn build_tree_from_csv(
         leaves.push(leaf);
     }
 
+    if duplicates > 0 {
+        println!("Warning: {} duplicate addresses skipped", duplicates);
+    }
     println!("Built {} unique leaves for Merkle tree", leaves.len());
     let (tree, root) = build_merkle_tree(&leaves);
 
     println!("Merkle root: 0x{}", hex::encode(root));
 
     Ok((tree, root, address_to_index))
+}
+
+fn build_tree_from_saved(
+    leaves: &[[u8; 32]],
+    address_to_index: &HashMap<[u8; 20], u64>,
+) -> (Vec<Vec<[u8; 32]>>, [u8; 32]) {
+    println!(
+        "Rebuilding Merkle tree from {} saved leaves...",
+        leaves.len()
+    );
+    let (tree, root) = build_merkle_tree(leaves);
+    let _ = address_to_index;
+    println!("Merkle root: 0x{}", hex::encode(root));
+    (tree, root)
 }
 
 pub fn generate_proof(
@@ -230,7 +275,7 @@ pub fn generate_proof(
         .get(&eligible_address)
         .context("Eligible address not found in Merkle tree")?;
 
-    let merkle_proof = get_merkle_proof(tree, *index);
+    let merkle_proof = get_merkle_proof(tree, *index)?;
 
     let claimant_address = parse_address(claimant_address_hex)?;
     let airdrop_contract = parse_address(airdrop_contract_hex)?;
@@ -258,7 +303,7 @@ pub fn generate_proof(
 
     receipt.verify(AIRDROP_ID)?;
 
-    let output: GuestOutput = receipt.journal.decode()?;
+    let output = decode_journal_output(&receipt.journal.bytes)?;
 
     println!("Proof generated successfully!");
     println!("Nullifier: 0x{}", hex::encode(output.nullifier));
@@ -323,7 +368,7 @@ enum Commands {
         #[arg(short, long)]
         tree_file: PathBuf,
         #[arg(short, long)]
-        csv: PathBuf,
+        csv: Option<PathBuf>,
         #[arg(short, long)]
         claimant: String,
         #[arg(short, long)]
@@ -357,10 +402,34 @@ fn main() -> Result<()> {
 
             let output_file = output.unwrap_or(PathBuf::from("merkle_tree.json"));
 
+            let mut leaves_hex = Vec::with_capacity(address_to_index.len());
+            let mut addr_entries: Vec<(&[u8; 20], &u64)> = address_to_index.iter().collect();
+            addr_entries.sort_by_key(|(_, &idx)| idx);
+
+            for (addr, &idx) in &addr_entries {
+                let leaf = hash_leaf(addr);
+                leaves_hex.push((format!("0x{}", hex::encode(leaf)), idx));
+            }
+
+            let mut addr_map = serde_json::Map::new();
+            for (addr, &idx) in &addr_entries {
+                addr_map.insert(
+                    format!("0x{}", hex::encode(addr)),
+                    serde_json::Value::Number(idx.into()),
+                );
+            }
+
+            let leaves_array: Vec<serde_json::Value> = leaves_hex
+                .into_iter()
+                .map(|(h, _)| serde_json::Value::String(h))
+                .collect();
+
             let tree_data = serde_json::json!({
                 "merkle_root": format!("0x{}", hex::encode(root)),
                 "total_leaves": address_to_index.len(),
                 "csv_path": csv.to_string_lossy(),
+                "leaves": leaves_array,
+                "address_to_index": addr_map,
             });
 
             let mut file = File::create(&output_file)?;
@@ -395,7 +464,58 @@ fn main() -> Result<()> {
             let mut merkle_root = [0u8; 32];
             merkle_root.copy_from_slice(&merkle_root_bytes);
 
-            let (_tree, _root, address_to_index) = build_tree_from_csv(&csv)?;
+            let (tree, _root, address_to_index) = if let Some(leaves_arr) =
+                tree_data.get("leaves").and_then(|v| v.as_array())
+            {
+                if leaves_arr.is_empty() {
+                    anyhow::bail!("Tree file contains no leaves");
+                }
+
+                let addr_map_obj = tree_data
+                    .get("address_to_index")
+                    .and_then(|v| v.as_object())
+                    .context("Tree file missing address_to_index mapping")?;
+
+                let mut leaves: Vec<[u8; 32]> = Vec::with_capacity(leaves_arr.len());
+                for leaf_hex in leaves_arr {
+                    let hex_str = leaf_hex
+                        .as_str()
+                        .context("Invalid leaf entry in tree file")?;
+                    let bytes = hex::decode(hex_str.strip_prefix("0x").unwrap_or(hex_str))?;
+                    let mut leaf = [0u8; 32];
+                    leaf.copy_from_slice(&bytes);
+                    leaves.push(leaf);
+                }
+
+                let mut address_to_index: HashMap<[u8; 20], u64> = HashMap::new();
+                for (addr_hex, idx_val) in addr_map_obj {
+                    let idx = idx_val
+                        .as_u64()
+                        .context("Invalid index in address_to_index")?;
+                    let addr_bytes = hex::decode(addr_hex.strip_prefix("0x").unwrap_or(addr_hex))?;
+                    let mut addr = [0u8; 20];
+                    addr.copy_from_slice(&addr_bytes);
+                    address_to_index.insert(addr, idx);
+                }
+
+                let (tree, root) = build_tree_from_saved(&leaves, &address_to_index);
+                anyhow::ensure!(
+                    root == merkle_root,
+                    "Rebuilt merkle root does not match stored root"
+                );
+                (tree, root, address_to_index)
+            } else if let Some(csv_path) = csv {
+                let (tree, root, address_to_index) = build_tree_from_csv(&csv_path)?;
+                anyhow::ensure!(
+                    root == merkle_root,
+                    "Rebuilt merkle root does not match tree file root"
+                );
+                (tree, root, address_to_index)
+            } else {
+                anyhow::bail!(
+                    "Tree file does not contain leaf data. Provide --csv to rebuild from CSV."
+                );
+            };
 
             let private_key = std::env::var("PRIVATE_KEY").context(
                 "PRIVATE_KEY environment variable not set. Set it with: export PRIVATE_KEY=0x...",
@@ -406,7 +526,7 @@ fn main() -> Result<()> {
                 &claimant,
                 &contract,
                 chain_id,
-                &_tree,
+                &tree,
                 merkle_root,
                 &address_to_index,
             )?;
@@ -459,7 +579,7 @@ fn main() -> Result<()> {
             let mut merkle_root_arr = [0u8; 32];
             merkle_root_arr.copy_from_slice(&root_bytes);
 
-            let output: GuestOutput = receipt.journal.decode()?;
+            let output = decode_journal_output(&receipt.journal.bytes)?;
 
             assert_eq!(output.merkle_root, merkle_root_arr, "Merkle root mismatch");
 

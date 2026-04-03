@@ -5,6 +5,7 @@ import {IRiscZeroVerifier} from "@risc0/IRiscZeroVerifier.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
+import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 
 struct GuestOutput {
     bytes32 merkleRoot;
@@ -12,7 +13,7 @@ struct GuestOutput {
     bytes20 claimantAddress;
 }
 
-contract AnonymousAirdrop is Ownable {
+contract AnonymousAirdrop is Ownable, ReentrancyGuard {
     using SafeERC20 for IERC20;
 
     IRiscZeroVerifier public immutable verifier;
@@ -20,6 +21,7 @@ contract AnonymousAirdrop is Ownable {
     IERC20 public immutable token;
     bytes32 public immutable merkleRoot;
     uint256 public immutable amountPerClaim;
+    uint256 public immutable claimDeadline;
 
     mapping(bytes32 => bool) public nullifiers;
     uint256 public totalClaimed;
@@ -41,16 +43,21 @@ contract AnonymousAirdrop is Ownable {
         bytes32 _imageId,
         IERC20 _token,
         bytes32 _merkleRoot,
-        uint256 _amountPerClaim
+        uint256 _amountPerClaim,
+        uint256 _claimDeadline
     ) Ownable(msg.sender) {
         require(address(_verifier) != address(0), "zero verifier address");
+        require(_imageId != bytes32(0), "zero image ID");
         require(address(_token) != address(0), "zero token address");
+        require(_merkleRoot != bytes32(0), "zero merkle root");
         require(_amountPerClaim > 0, "zero claim amount");
+        require(_claimDeadline == 0 || _claimDeadline > block.timestamp, "deadline must be future or zero");
         verifier = _verifier;
         imageId = _imageId;
         token = _token;
         merkleRoot = _merkleRoot;
         amountPerClaim = _amountPerClaim;
+        claimDeadline = _claimDeadline;
         claimsActive = false;
     }
 
@@ -62,9 +69,10 @@ contract AnonymousAirdrop is Ownable {
         bytes calldata seal,
         bytes calldata journal,
         bytes32 expectedNullifier
-    ) external {
+    ) external nonReentrant {
         require(claimsActive, "Claims not active");
         require(!nullifiers[expectedNullifier], "Already claimed");
+        require(claimDeadline == 0 || block.timestamp <= claimDeadline, "Claim period ended");
         require(token.balanceOf(address(this)) >= amountPerClaim, "Insufficient airdrop balance");
 
         verifier.verify(seal, imageId, sha256(journal));
@@ -73,6 +81,8 @@ contract AnonymousAirdrop is Ownable {
 
         require(output.merkleRoot == merkleRoot, "Invalid merkle root");
         require(output.nullifier == expectedNullifier, "Nullifier mismatch");
+        require(address(output.claimantAddress) != address(0), "zero claimant address");
+        require(msg.sender == address(output.claimantAddress), "Not claimant");
 
         nullifiers[expectedNullifier] = true;
         totalClaimed += amountPerClaim;
@@ -101,8 +111,9 @@ contract AnonymousAirdrop is Ownable {
 
     /// @notice Withdraw remaining tokens after claims are permanently closed
     /// @param to Address to receive the remaining tokens
-    function emergencyWithdraw(address to) external onlyOwner {
+    function emergencyWithdraw(address to) external onlyOwner nonReentrant {
         require(!claimsActive, "Claims still active");
+        require(to != address(0), "zero withdraw address");
         uint256 balance = token.balanceOf(address(this));
         require(balance > 0, "No tokens to withdraw");
         token.safeTransfer(to, balance);
