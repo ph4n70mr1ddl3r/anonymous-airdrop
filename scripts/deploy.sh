@@ -16,9 +16,20 @@ echo "Network: $CHAIN"
 echo "RPC: $RPC_URL"
 echo ""
 
+if [ "${RISC0_DEV_MODE:-0}" = "1" ]; then
+    echo "WARNING: RISC0_DEV_MODE is set to 1. This produces fake proofs!"
+    echo "Do NOT use this for production deployments."
+    read -p "Continue anyway? (y/N) " -n 1 -r
+    echo
+    if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+        echo "Aborted."
+        exit 1
+    fi
+fi
+
 echo "Step 1: Building RISC Zero guest program..."
 cd "$(dirname "$0")/.."
-RISC0_DEV_MODE=1 cargo build --release
+cargo build --release
 echo ""
 
 echo "Step 2: Installing Foundry dependencies..."
@@ -60,6 +71,12 @@ if [ -z "${MERKLE_ROOT:-}" ]; then
     exit 1
 fi
 
+if [ -z "${ELIGIBLE_CSV:-}" ]; then
+    echo "Error: ELIGIBLE_CSV environment variable not set"
+    echo "Set this to the path of your eligible addresses CSV"
+    exit 1
+fi
+
 AMOUNT_PER_CLAIM="${AMOUNT_PER_CLAIM:-1000000000000000000}"
 
 echo "Verifier: $VERIFIER_ADDRESS"
@@ -86,7 +103,11 @@ echo "Contract deployed to: $CONTRACT_ADDRESS"
 echo ""
 
 echo "Step 5: Transferring tokens to airdrop contract..."
-TOTAL_TOKENS=$(python3 -c "print($AMOUNT_PER_CLAIM * 32000000)")
+
+ADDRESS_COUNT=$(grep -c '^0x' "$ELIGIBLE_CSV" || true)
+echo "Found $ADDRESS_COUNT eligible addresses in CSV"
+
+TOTAL_TOKENS=$(python3 -c "print(int($AMOUNT_PER_CLAIM) * int($ADDRESS_COUNT))")
 echo "Transferring $TOTAL_TOKENS tokens to airdrop contract..."
 
 cast send "$TOKEN_ADDRESS" \

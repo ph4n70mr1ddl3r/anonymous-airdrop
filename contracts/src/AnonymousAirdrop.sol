@@ -4,6 +4,7 @@ pragma solidity ^0.8.28;
 import {IRiscZeroVerifier} from "@risc0/IRiscZeroVerifier.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 
 struct GuestOutput {
     bytes32 merkleRoot;
@@ -11,7 +12,7 @@ struct GuestOutput {
     bytes20 claimantAddress;
 }
 
-contract AnonymousAirdrop {
+contract AnonymousAirdrop is Ownable {
     using SafeERC20 for IERC20;
 
     IRiscZeroVerifier public immutable verifier;
@@ -41,7 +42,7 @@ contract AnonymousAirdrop {
         IERC20 _token,
         bytes32 _merkleRoot,
         uint256 _amountPerClaim
-    ) {
+    ) Ownable(msg.sender) {
         verifier = _verifier;
         imageId = _imageId;
         token = _token;
@@ -50,6 +51,10 @@ contract AnonymousAirdrop {
         claimsActive = false;
     }
 
+    /// @notice Claim tokens from the airdrop using a valid ZK proof
+    /// @param seal The RISC Zero proof seal
+    /// @param journal The journal output from the zkVM execution
+    /// @param expectedNullifier The expected nullifier to prevent double claims
     function claim(
         bytes calldata seal,
         bytes calldata journal,
@@ -57,6 +62,7 @@ contract AnonymousAirdrop {
     ) external {
         require(claimsActive, "Claims not active");
         require(!nullifiers[expectedNullifier], "Already claimed");
+        require(token.balanceOf(address(this)) >= amountPerClaim, "Insufficient airdrop balance");
 
         verifier.verify(seal, imageId, sha256(journal));
 
@@ -78,26 +84,37 @@ contract AnonymousAirdrop {
         );
     }
 
-    function startClaims() external {
+    /// @notice Start the claims phase, allowing users to claim tokens
+    function startClaims() external onlyOwner {
         claimsActive = true;
         emit ClaimsStarted();
     }
 
-    function pauseClaims() external {
+    /// @notice Pause claims temporarily
+    function pauseClaims() external onlyOwner {
         claimsActive = false;
         emit ClaimsPaused();
     }
 
-    function emergencyWithdraw(address to) external {
+    /// @notice Withdraw remaining tokens after claims are permanently closed
+    /// @param to Address to receive the remaining tokens
+    function emergencyWithdraw(address to) external onlyOwner {
+        require(!claimsActive, "Claims still active");
         uint256 balance = token.balanceOf(address(this));
+        require(balance > 0, "No tokens to withdraw");
         token.safeTransfer(to, balance);
         emit EmergencyWithdraw(to, balance);
     }
 
+    /// @notice Get the remaining token balance in the contract
+    /// @return The number of tokens remaining
     function getRemainingTokens() external view returns (uint256) {
         return token.balanceOf(address(this));
     }
 
+    /// @notice Check if a nullifier has already been claimed
+    /// @param nullifier The nullifier to check
+    /// @return True if the nullifier has been claimed
     function isClaimed(bytes32 nullifier) external view returns (bool) {
         return nullifiers[nullifier];
     }

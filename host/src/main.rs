@@ -133,6 +133,7 @@ pub fn parse_csv(csv_path: &PathBuf) -> Result<Vec<([u8; 20], u64)>> {
     let file = File::open(csv_path).context("Failed to open CSV file")?;
     let reader = BufReader::new(file);
     let mut entries = Vec::new();
+    let mut duplicates = 0u64;
 
     for (line_idx, line) in reader.lines().enumerate() {
         let line = line?;
@@ -167,6 +168,10 @@ pub fn parse_csv(csv_path: &PathBuf) -> Result<Vec<([u8; 20], u64)>> {
         entries.push((address, line_idx as u64));
     }
 
+    if duplicates > 0 {
+        eprintln!("WARNING: {} duplicate addresses were skipped", duplicates);
+    }
+
     Ok(entries)
 }
 
@@ -179,9 +184,11 @@ pub fn build_tree_from_csv(
 
     let mut address_to_index: HashMap<[u8; 20], u64> = HashMap::new();
     let mut leaves: Vec<[u8; 32]> = Vec::with_capacity(entries.len());
+    let mut duplicates = 0u64;
 
     for (address, _line) in &entries {
         if address_to_index.contains_key(address) {
+            duplicates += 1;
             continue;
         }
         let leaf = hash_leaf(address);
@@ -321,7 +328,7 @@ enum Commands {
         #[arg(short, long)]
         tree_file: PathBuf,
         #[arg(short, long)]
-        private_key: String,
+        csv: PathBuf,
         #[arg(short, long)]
         claimant: String,
         #[arg(short, long)]
@@ -338,12 +345,18 @@ enum Commands {
         #[arg(short, long)]
         merkle_root: String,
     },
+    /// Print the Image ID of the guest program
+    ImageId,
 }
 
 fn main() -> Result<()> {
     let cli = Cli::parse();
 
     match cli.command {
+        Commands::ImageId => {
+            println!("0x{}", hex::encode(AIRDROP_ID));
+        }
+
         Commands::BuildTree { csv, output } => {
             let (_tree, root, address_to_index) = build_tree_from_csv(&csv)?;
 
@@ -352,6 +365,7 @@ fn main() -> Result<()> {
             let tree_data = serde_json::json!({
                 "merkle_root": format!("0x{}", hex::encode(root)),
                 "total_leaves": address_to_index.len(),
+                "csv_path": csv.to_string_lossy(),
             });
 
             let mut file = File::create(&output_file)?;
@@ -363,7 +377,7 @@ fn main() -> Result<()> {
 
         Commands::GenerateProof {
             tree_file,
-            private_key,
+            csv,
             claimant,
             contract,
             chain_id,
@@ -386,12 +400,11 @@ fn main() -> Result<()> {
             let mut merkle_root = [0u8; 32];
             merkle_root.copy_from_slice(&merkle_root_bytes);
 
-            let csv_path = tree_data["csv_path"]
-                .as_str()
-                .map(PathBuf::from)
-                .context("Missing csv_path in tree file")?;
+            let (_tree, _root, address_to_index) = build_tree_from_csv(&csv)?;
 
-            let (_tree, _root, address_to_index) = build_tree_from_csv(&csv_path)?;
+            let private_key = std::env::var("PRIVATE_KEY").context(
+                "PRIVATE_KEY environment variable not set. Set it with: export PRIVATE_KEY=0x...",
+            )?;
 
             let claim_proof = generate_proof(
                 &private_key,

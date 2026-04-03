@@ -92,7 +92,11 @@ fn verify_merkle_proof(proof: &MerkleProof, root: &[u8; 32]) -> bool {
 fn main() {
     let input: GuestInput = env::read();
 
-    let secret_key = SecretKey::from_slice(&input.private_key_bytes).unwrap();
+    if input.private_key_bytes == [0u8; 32] {
+        panic!("zero private key");
+    }
+
+    let secret_key = SecretKey::from_slice(&input.private_key_bytes).expect("invalid private key");
 
     let eligible_address = derive_ethereum_address(&secret_key);
 
