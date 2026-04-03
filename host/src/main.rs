@@ -2,7 +2,7 @@ use alloy_primitives::Address;
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 use k256::SecretKey;
-use methods::airdrop::{AIRDROP_ELF, AIRDROP_ID};
+use methods::{AIRDROP_ELF, AIRDROP_ID};
 use risc0_zkvm::{default_prover, ExecutorEnv, Receipt};
 use sha2::{Digest, Sha256};
 use std::{
@@ -10,8 +10,8 @@ use std::{
     fs::File,
     io::{BufRead, BufReader, Write},
     path::PathBuf,
-    str::FromStr,
 };
+use zeroize::Zeroize;
 
 const MERKLE_TREE_DEPTH: usize = 32;
 
@@ -125,6 +125,13 @@ pub fn get_merkle_proof(tree: &[Vec<[u8; 32]>], index: u64) -> Result<MerkleProo
     if tree.is_empty() || tree[0].is_empty() {
         anyhow::bail!("Cannot generate Merkle proof for empty tree");
     }
+    if tree.len() <= MERKLE_TREE_DEPTH {
+        anyhow::bail!(
+            "Tree has insufficient depth ({} levels, need {})",
+            tree.len(),
+            MERKLE_TREE_DEPTH + 1
+        );
+    }
     if index as usize >= tree[0].len() {
         anyhow::bail!(
             "Index {} out of bounds (tree has {} leaves)",
@@ -182,12 +189,27 @@ pub fn parse_csv(csv_path: &PathBuf) -> Result<Vec<([u8; 20], u64)>> {
             continue;
         }
 
-        let address_bytes = hex::decode(&address_str[2..])
+        let hex_part = &address_str[2..];
+        let lower = hex_part.to_lowercase();
+        let checksummed = format!("0x{}", lower);
+        let address_bytes = hex::decode(&lower)
             .context(format!("Failed to decode hex address: {}", address_str))?;
 
         if address_bytes.len() != 20 {
             eprintln!("Invalid address length at line {}", line_idx + 1);
             continue;
+        }
+
+        if address_str != checksummed {
+            let has_upper = hex_part.chars().any(|c| c.is_ascii_uppercase());
+            let has_lower = hex_part.chars().any(|c| c.is_ascii_lowercase());
+            if has_upper && has_lower {
+                eprintln!(
+                    "Warning: Address at line {} may have invalid EIP-55 checksum: {}",
+                    line_idx + 1,
+                    address_str
+                );
+            }
         }
 
         let mut address = [0u8; 20];
@@ -223,6 +245,29 @@ pub fn build_tree_from_csv(
         println!("Warning: {} duplicate addresses skipped", duplicates);
     }
     println!("Built {} unique leaves for Merkle tree", leaves.len());
+
+    if entries.len() > 1_000_000 {
+        eprintln!(
+            "Warning: Building tree with {} leaves. This may require significant memory (~2GB per 1M leaves).",
+            leaves.len()
+        );
+    }
+
+    let mut paired: Vec<([u8; 20], [u8; 32])> = address_to_index
+        .iter()
+        .map(|(&addr, _)| {
+            let leaf = hash_leaf(&addr);
+            (addr, leaf)
+        })
+        .collect();
+    paired.sort_by(|a, b| a.0.cmp(&b.0));
+    leaves = paired.iter().map(|(_, leaf)| *leaf).collect();
+    address_to_index.clear();
+    for (i, (addr, _)) in paired.iter().enumerate() {
+        address_to_index.insert(*addr, i as u64);
+    }
+    println!("Leaves sorted canonically by address");
+
     let (tree, root) = build_merkle_tree(&leaves);
 
     println!("Merkle root: 0x{}", hex::encode(root));
@@ -230,16 +275,12 @@ pub fn build_tree_from_csv(
     Ok((tree, root, address_to_index))
 }
 
-fn build_tree_from_saved(
-    leaves: &[[u8; 32]],
-    address_to_index: &HashMap<[u8; 20], u64>,
-) -> (Vec<Vec<[u8; 32]>>, [u8; 32]) {
+fn build_tree_from_saved(leaves: &[[u8; 32]]) -> (Vec<Vec<[u8; 32]>>, [u8; 32]) {
     println!(
         "Rebuilding Merkle tree from {} saved leaves...",
         leaves.len()
     );
     let (tree, root) = build_merkle_tree(leaves);
-    let _ = address_to_index;
     println!("Merkle root: 0x{}", hex::encode(root));
     (tree, root)
 }
@@ -253,7 +294,7 @@ pub fn generate_proof(
     merkle_root: [u8; 32],
     address_to_index: &HashMap<[u8; 20], u64>,
 ) -> Result<ClaimProof> {
-    let private_key_bytes = hex::decode(
+    let mut private_key_bytes = hex::decode(
         private_key_hex
             .strip_prefix("0x")
             .unwrap_or(private_key_hex),
@@ -266,6 +307,7 @@ pub fn generate_proof(
 
     let mut pk_bytes = [0u8; 32];
     pk_bytes.copy_from_slice(&private_key_bytes);
+    private_key_bytes.zeroize();
 
     let secret_key = SecretKey::from_slice(&pk_bytes).context("Invalid private key")?;
 
@@ -281,10 +323,10 @@ pub fn generate_proof(
     let airdrop_contract = parse_address(airdrop_contract_hex)?;
 
     let mut claimant_bytes = [0u8; 20];
-    claimant_bytes.copy_from_slice(&claimant_address);
+    claimant_bytes.copy_from_slice(claimant_address.as_slice());
 
     let mut contract_bytes = [0u8; 20];
-    contract_bytes.copy_from_slice(&airdrop_contract);
+    contract_bytes.copy_from_slice(airdrop_contract.as_slice());
 
     let input = GuestInput {
         private_key_bytes: pk_bytes,
@@ -295,13 +337,17 @@ pub fn generate_proof(
         chain_id,
     };
 
+    pk_bytes.zeroize();
+
     println!("Generating zero-knowledge proof...");
     let env = ExecutorEnv::builder().write(&input)?.build()?;
 
     let prover = default_prover();
     let receipt = prover.prove(env, AIRDROP_ELF)?.receipt;
 
-    receipt.verify(AIRDROP_ID)?;
+    receipt
+        .verify(AIRDROP_ID)
+        .map_err(|e| anyhow::anyhow!("Receipt verification failed: {:?}", e))?;
 
     let output = decode_journal_output(&receipt.journal.bytes)?;
 
@@ -394,7 +440,8 @@ fn main() -> Result<()> {
 
     match cli.command {
         Commands::ImageId => {
-            println!("0x{}", hex::encode(AIRDROP_ID));
+            let id_bytes: Vec<u8> = AIRDROP_ID.iter().flat_map(|&w| w.to_be_bytes()).collect();
+            println!("0x{}", hex::encode(id_bytes));
         }
 
         Commands::BuildTree { csv, output } => {
@@ -404,18 +451,18 @@ fn main() -> Result<()> {
 
             let mut leaves_hex = Vec::with_capacity(address_to_index.len());
             let mut addr_entries: Vec<(&[u8; 20], &u64)> = address_to_index.iter().collect();
-            addr_entries.sort_by_key(|(_, &idx)| idx);
+            addr_entries.sort_by_key(|(_, idx)| *idx);
 
-            for (addr, &idx) in &addr_entries {
+            for (addr, idx) in &addr_entries {
                 let leaf = hash_leaf(addr);
-                leaves_hex.push((format!("0x{}", hex::encode(leaf)), idx));
+                leaves_hex.push((format!("0x{}", hex::encode(leaf)), *idx));
             }
 
             let mut addr_map = serde_json::Map::new();
-            for (addr, &idx) in &addr_entries {
+            for (addr, idx) in &addr_entries {
                 addr_map.insert(
                     format!("0x{}", hex::encode(addr)),
-                    serde_json::Value::Number(idx.into()),
+                    serde_json::Value::Number((**idx).into()),
                 );
             }
 
@@ -498,7 +545,7 @@ fn main() -> Result<()> {
                     address_to_index.insert(addr, idx);
                 }
 
-                let (tree, root) = build_tree_from_saved(&leaves, &address_to_index);
+                let (tree, root) = build_tree_from_saved(&leaves);
                 anyhow::ensure!(
                     root == merkle_root,
                     "Rebuilt merkle root does not match stored root"
@@ -536,10 +583,7 @@ fn main() -> Result<()> {
             let proof_data = serde_json::json!({
                 "nullifier": format!("0x{}", hex::encode(claim_proof.nullifier)),
                 "claimant_address": format!("0x{}", hex::encode(claim_proof.claimant_address)),
-                "receipt": {
-                    "seal": hex::encode(claim_proof.receipt.seal),
-                    "journal": hex::encode(claim_proof.receipt.journal.bytes),
-                },
+                "receipt": serde_json::to_value(&claim_proof.receipt)?,
                 "chain_id": chain_id,
             });
 
@@ -558,21 +602,12 @@ fn main() -> Result<()> {
                 serde_json::from_str(&content)?
             };
 
-            let receipt_data = &proof_data["receipt"];
-            let seal_hex = receipt_data["seal"].as_str().context("Missing seal")?;
-            let journal_hex = receipt_data["journal"]
-                .as_str()
-                .context("Missing journal")?;
+            let receipt: Receipt = serde_json::from_value(proof_data["receipt"].clone())
+                .context("Failed to deserialize receipt")?;
 
-            let seal = hex::decode(seal_hex).context("Invalid seal hex")?;
-            let journal_bytes = hex::decode(journal_hex).context("Invalid journal hex")?;
-
-            let receipt = Receipt {
-                seal,
-                journal: risc0_zkvm::Journal::new(journal_bytes),
-            };
-
-            receipt.verify(AIRDROP_ID)?;
+            receipt
+                .verify(AIRDROP_ID)
+                .map_err(|e| anyhow::anyhow!("Receipt verification failed: {:?}", e))?;
 
             let root_bytes = hex::decode(merkle_root.strip_prefix("0x").unwrap_or(&merkle_root))
                 .context("Invalid merkle root hex")?;
@@ -590,4 +625,267 @@ fn main() -> Result<()> {
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Write;
+    use tempfile::NamedTempFile;
+
+    #[test]
+    fn test_sha256_pair_deterministic() {
+        let left = [1u8; 32];
+        let right = [2u8; 32];
+        let hash1 = sha256_pair(&left, &right);
+        let hash2 = sha256_pair(&left, &right);
+        assert_eq!(hash1, hash2);
+    }
+
+    #[test]
+    fn test_sha256_pair_order_matters() {
+        let left = [1u8; 32];
+        let right = [2u8; 32];
+        assert_ne!(sha256_pair(&left, &right), sha256_pair(&right, &left));
+    }
+
+    #[test]
+    fn test_hash_leaf_consistency() {
+        let addr = [0x11u8; 20];
+        let hash1 = hash_leaf(&addr);
+        let hash2 = hash_leaf(&addr);
+        assert_eq!(hash1, hash2);
+    }
+
+    #[test]
+    fn test_hash_leaf_different_addresses() {
+        let addr1 = [0x11u8; 20];
+        let addr2 = [0x22u8; 20];
+        assert_ne!(hash_leaf(&addr1), hash_leaf(&addr2));
+    }
+
+    #[test]
+    fn test_hash_empty_deterministic() {
+        let h1 = hash_empty();
+        let h2 = hash_empty();
+        assert_eq!(h1, h2);
+    }
+
+    #[test]
+    fn test_build_merkle_tree_empty() {
+        let (tree, root) = build_merkle_tree(&[]);
+        assert_eq!(tree.len(), 1);
+        assert_eq!(root, hash_empty());
+    }
+
+    #[test]
+    fn test_build_merkle_tree_single_leaf() {
+        let leaf = hash_leaf(&[1u8; 20]);
+        let (tree, _root) = build_merkle_tree(&[leaf]);
+        assert_eq!(tree[0].len(), 1);
+        assert_eq!(tree[0][0], leaf);
+        assert_eq!(tree.len(), MERKLE_TREE_DEPTH + 1);
+    }
+
+    #[test]
+    fn test_build_merkle_tree_two_leaves() {
+        let leaf1 = hash_leaf(&[1u8; 20]);
+        let leaf2 = hash_leaf(&[2u8; 20]);
+        let (tree, _root) = build_merkle_tree(&[leaf1, leaf2]);
+        assert_eq!(tree[0].len(), 2);
+        assert_eq!(tree[1].len(), 1);
+        assert_eq!(tree[1][0], sha256_pair(&leaf1, &leaf2));
+    }
+
+    #[test]
+    fn test_build_merkle_tree_three_leaves() {
+        let leaf1 = hash_leaf(&[1u8; 20]);
+        let leaf2 = hash_leaf(&[2u8; 20]);
+        let leaf3 = hash_leaf(&[3u8; 20]);
+        let (tree, _root) = build_merkle_tree(&[leaf1, leaf2, leaf3]);
+        assert_eq!(tree[0].len(), 3);
+        let level1_0 = sha256_pair(&leaf1, &leaf2);
+        let level1_1 = sha256_pair(&leaf3, &leaf3);
+        assert_eq!(tree[1][0], level1_0);
+        assert_eq!(tree[1][1], level1_1);
+    }
+
+    #[test]
+    fn test_merkle_proof_single_leaf() {
+        let leaf = hash_leaf(&[1u8; 20]);
+        let (tree, root) = build_merkle_tree(&[leaf]);
+        let proof = get_merkle_proof(&tree, 0).unwrap();
+        assert_eq!(proof.leaf, leaf);
+        for i in 0..MERKLE_TREE_DEPTH {
+            assert_eq!(proof.path[i], tree[i][0]);
+        }
+        let mut current = proof.leaf;
+        let mut index = proof.index;
+        for i in 0..MERKLE_TREE_DEPTH {
+            if index & 1 == 0 {
+                current = sha256_pair(&current, &proof.path[i]);
+            } else {
+                current = sha256_pair(&proof.path[i], &current);
+            }
+            index >>= 1;
+        }
+        assert_eq!(current, root, "Proof verification should produce the root");
+    }
+
+    #[test]
+    fn test_merkle_proof_two_leaves() {
+        let leaf0 = hash_leaf(&[1u8; 20]);
+        let leaf1 = hash_leaf(&[2u8; 20]);
+        let (tree, root) = build_merkle_tree(&[leaf0, leaf1]);
+
+        let proof0 = get_merkle_proof(&tree, 0).unwrap();
+        assert_eq!(proof0.leaf, leaf0);
+        assert_eq!(proof0.path[0], leaf1);
+
+        let proof1 = get_merkle_proof(&tree, 1).unwrap();
+        assert_eq!(proof1.leaf, leaf1);
+        assert_eq!(proof1.path[0], leaf0);
+
+        let mut current = proof0.leaf;
+        let mut index = proof0.index;
+        for i in 0..MERKLE_TREE_DEPTH {
+            if index & 1 == 0 {
+                current = sha256_pair(&current, &proof0.path[i]);
+            } else {
+                current = sha256_pair(&proof0.path[i], &current);
+            }
+            index >>= 1;
+        }
+        assert_eq!(current, root, "Proof verification should produce the root");
+    }
+
+    #[test]
+    fn test_merkle_proof_out_of_bounds() {
+        let leaf = hash_leaf(&[1u8; 20]);
+        let (tree, _) = build_merkle_tree(&[leaf]);
+        assert!(get_merkle_proof(&tree, 1).is_err());
+    }
+
+    #[test]
+    fn test_merkle_proof_empty_tree() {
+        let (tree, _) = build_merkle_tree(&[]);
+        assert!(get_merkle_proof(&tree, 0).is_err());
+    }
+
+    #[test]
+    fn test_decode_journal_output_valid() {
+        let mut journal = [0u8; 96];
+        journal[0..32].copy_from_slice(&[1u8; 32]);
+        journal[32..64].copy_from_slice(&[2u8; 32]);
+        journal[64..84].copy_from_slice(&[3u8; 20]);
+        let output = decode_journal_output(&journal).unwrap();
+        assert_eq!(output.merkle_root, [1u8; 32]);
+        assert_eq!(output.nullifier, [2u8; 32]);
+        assert_eq!(output.claimant_address, [3u8; 20]);
+    }
+
+    #[test]
+    fn test_decode_journal_output_wrong_length() {
+        let journal = [0u8; 95];
+        assert!(decode_journal_output(&journal).is_err());
+    }
+
+    #[test]
+    fn test_decode_journal_output_nonzero_padding() {
+        let mut journal = [0u8; 96];
+        journal[90] = 1;
+        assert!(decode_journal_output(&journal).is_err());
+    }
+
+    #[test]
+    fn test_parse_csv_valid() {
+        let mut file = NamedTempFile::new().unwrap();
+        writeln!(file, "0x1111111111111111111111111111111111111111").unwrap();
+        writeln!(file, "0x2222222222222222222222222222222222222222").unwrap();
+        file.flush().unwrap();
+
+        let entries = parse_csv(&file.path().to_path_buf()).unwrap();
+        assert_eq!(entries.len(), 2);
+        assert_eq!(entries[0].0, [0x11u8; 20]);
+        assert_eq!(entries[1].0, [0x22u8; 20]);
+    }
+
+    #[test]
+    fn test_parse_csv_skips_invalid() {
+        let mut file = NamedTempFile::new().unwrap();
+        writeln!(file, "0x1111111111111111111111111111111111111111").unwrap();
+        writeln!(file, "invalid").unwrap();
+        writeln!(file, "").unwrap();
+        writeln!(file, "# comment").unwrap();
+        writeln!(file, "address,value").unwrap();
+        writeln!(file, "0x2222222222222222222222222222222222222222").unwrap();
+        file.flush().unwrap();
+
+        let entries = parse_csv(&file.path().to_path_buf()).unwrap();
+        assert_eq!(entries.len(), 2);
+    }
+
+    #[test]
+    fn test_parse_csv_with_amount_column() {
+        let mut file = NamedTempFile::new().unwrap();
+        writeln!(file, "0x1111111111111111111111111111111111111111,1000").unwrap();
+        writeln!(file, "0x2222222222222222222222222222222222222222,2000").unwrap();
+        file.flush().unwrap();
+
+        let entries = parse_csv(&file.path().to_path_buf()).unwrap();
+        assert_eq!(entries.len(), 2);
+    }
+
+    #[test]
+    fn test_parse_csv_no_file() {
+        let result = parse_csv(&PathBuf::from("/nonexistent/file.csv"));
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_canonical_ordering() {
+        let addr_high = [0xFFu8; 20];
+        let addr_low = [0x01u8; 20];
+        let mut file = NamedTempFile::new().unwrap();
+        writeln!(file, "0x{}", hex::encode(addr_high)).unwrap();
+        writeln!(file, "0x{}", hex::encode(addr_low)).unwrap();
+        file.flush().unwrap();
+
+        let root1 = {
+            let mut file2 = NamedTempFile::new().unwrap();
+            writeln!(file2, "0x{}", hex::encode(addr_low)).unwrap();
+            writeln!(file2, "0x{}", hex::encode(addr_high)).unwrap();
+            file2.flush().unwrap();
+            let (_, root, _) = build_tree_from_csv(&file2.path().to_path_buf()).unwrap();
+            root
+        };
+
+        let (_, root2, _) = build_tree_from_csv(&file.path().to_path_buf()).unwrap();
+        assert_eq!(
+            root1, root2,
+            "Merkle roots should be identical regardless of CSV order"
+        );
+    }
+
+    #[test]
+    fn test_parse_address_valid() {
+        let addr = parse_address("0x1111111111111111111111111111111111111111").unwrap();
+        assert_eq!(addr.as_slice(), &[0x11u8; 20]);
+    }
+
+    #[test]
+    fn test_parse_address_no_prefix() {
+        let addr = parse_address("1111111111111111111111111111111111111111").unwrap();
+        assert_eq!(addr.as_slice(), &[0x11u8; 20]);
+    }
+
+    #[test]
+    fn test_parse_address_wrong_length() {
+        assert!(parse_address("0x1234").is_err());
+    }
+
+    #[test]
+    fn test_parse_address_invalid_hex() {
+        assert!(parse_address("0xGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGG").is_err());
+    }
 }

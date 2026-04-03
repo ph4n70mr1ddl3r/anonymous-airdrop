@@ -19,11 +19,15 @@ echo ""
 if [ "${RISC0_DEV_MODE:-0}" = "1" ]; then
     echo "WARNING: RISC0_DEV_MODE is set to 1. This produces fake proofs!"
     echo "Do NOT use this for production deployments."
-    read -p "Continue anyway? (y/N) " -n 1 -r
-    echo
-    if [[ ! $REPLY =~ ^[Yy]$ ]]; then
-        echo "Aborted."
-        exit 1
+    if [ -t 0 ]; then
+        read -p "Continue anyway? (y/N) " -n 1 -r
+        echo
+        if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+            echo "Aborted."
+            exit 1
+        fi
+    else
+        echo "Non-interactive mode: pass --force or set RISC0_DEV_MODE=0 for production."
     fi
 fi
 
@@ -110,7 +114,7 @@ echo "Step 5: Transferring tokens to airdrop contract..."
 ADDRESS_COUNT=$(grep -c '^0x' "$ELIGIBLE_CSV" || true)
 echo "Found $ADDRESS_COUNT eligible addresses in CSV"
 
-TOTAL_TOKENS=$(python3 -c "print(int($AMOUNT_PER_CLAIM) * int($ADDRESS_COUNT))")
+TOTAL_TOKENS=$((AMOUNT_PER_CLAIM * ADDRESS_COUNT))
 echo "Transferring $TOTAL_TOKENS tokens to airdrop contract..."
 
 cast send "$TOKEN_ADDRESS" \

@@ -4,12 +4,14 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-risc0-zkvm = { workspace = true, features = ["std"] }
-k256 = { workspace = true }
-sha2 = { workspace = true }
-tiny-keccak = { workspace = true }
-serde = { workspace = true }
-hex = { workspace = true }
+risc0-zkvm = { version = "3.0", default-features = false, features = ["std"] }
+k256 = { version = "0.13", features = ["arithmetic", "serde", "expose-field", "std", "ecdsa"] }
+sha2 = "0.10"
+tiny-keccak = { version = "2.0", features = ["keccak"] }
+serde = { version = "1.0", features = ["derive"] }
+hex = "0.4"
+
+[workspace]
 
 [patch.crates-io]
 sha2 = { git = "https://github.com/risc0/RustCrypto-hashes", tag = "sha2-v0.10.9-risczero.0" }

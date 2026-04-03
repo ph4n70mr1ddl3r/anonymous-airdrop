@@ -540,3 +540,91 @@ contract ERC20Mock is ERC20 {
         _mint(to, amount);
     }
 }
+
+contract MaliciousERC20 is ERC20 {
+    AnonymousAirdrop public target;
+    bytes public attackSeal;
+    bytes public attackJournal;
+    bytes32 public attackNullifier;
+    bool public attacking;
+
+    constructor(string memory name, string memory symbol, address to, uint256 amount) ERC20(name, symbol) {
+        _mint(to, amount);
+    }
+
+    function setAttackParams(
+        AnonymousAirdrop _target,
+        bytes calldata _seal,
+        bytes calldata _journal,
+        bytes32 _nullifier
+    ) external {
+        target = _target;
+        attackSeal = _seal;
+        attackJournal = _journal;
+        attackNullifier = _nullifier;
+    }
+
+    function transfer(address to, uint256 amount) public override returns (bool) {
+        if (!attacking && address(target) != address(0)) {
+            attacking = true;
+            try target.claim(attackSeal, attackJournal, attackNullifier) {
+            } catch {
+            }
+            attacking = false;
+        }
+        return super.transfer(to, amount);
+    }
+}
+
+contract ReentrancyTest is Test {
+    MaliciousERC20 public token;
+    AnonymousAirdrop public airdrop;
+    IRiscZeroVerifier mockVerifier;
+
+    address owner = address(0x1);
+    address claimant = address(0x2);
+
+    function setUp() public {
+        vm.startPrank(owner);
+        token = new MaliciousERC20("BadToken", "BAD", owner, 1000000 * 10**18);
+
+        mockVerifier = IRiscZeroVerifier(address(new MockVerifier()));
+        bytes32 imageId = bytes32(uint256(1));
+        bytes32 merkleRoot = bytes32(0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef);
+
+        airdrop = new AnonymousAirdrop(
+            mockVerifier,
+            imageId,
+            IERC20(address(token)),
+            merkleRoot,
+            1000 * 10**18,
+            0
+        );
+
+        token.transfer(address(airdrop), 100000 * 10**18);
+        vm.stopPrank();
+    }
+
+    function testReentrancyBlocked() public {
+        vm.prank(owner);
+        airdrop.startClaims();
+
+        bytes32 nullifier = keccak256("reentrancy-test");
+        bytes20 claimant20 = bytes20(uint160(claimant));
+
+        GuestOutput memory output = GuestOutput({
+            merkleRoot: airdrop.merkleRoot(),
+            nullifier: nullifier,
+            claimantAddress: claimant20
+        });
+
+        bytes memory journal = abi.encode(output);
+        bytes memory seal = "";
+
+        token.setAttackParams(airdrop, seal, journal, nullifier);
+
+        vm.prank(claimant);
+        vm.expectRevert();
+        airdrop.claim(seal, journal, nullifier);
+    }
+}

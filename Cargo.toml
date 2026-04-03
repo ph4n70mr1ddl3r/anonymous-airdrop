@@ -1,6 +1,7 @@
 [workspace]
 resolver = "2"
 members = ["host", "methods"]
+exclude = ["methods/guest"]
 
 [workspace.dependencies]
 risc0-zkvm = { version = "3.0", default-features = false }

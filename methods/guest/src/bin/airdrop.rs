@@ -53,9 +53,13 @@ fn compute_nullifier(
     airdrop_contract: &[u8; 20],
     chain_id: u64,
 ) -> [u8; 32] {
+    let hashed_sk: [u8; 32] = Sha256::new()
+        .chain_update(secret_key_bytes)
+        .finalize()
+        .into();
     let mut hasher = Sha256::new();
-    hasher.update(b"airdrop-nullifier");
-    hasher.update(secret_key_bytes);
+    hasher.update(b"airdrop-nullifier-v2");
+    hasher.update(&hashed_sk);
     hasher.update(airdrop_contract);
     hasher.update(chain_id.to_be_bytes());
     hasher.finalize().into()
@@ -127,6 +131,16 @@ fn main() {
         input.chain_id,
     );
 
+    // Journal format: 96 bytes total
+    //   [0..32]   merkle_root as bytes32
+    //   [32..64]  nullifier as bytes32
+    //   [64..84]  claimant_address as bytes20
+    //   [84..96]  zero padding (12 bytes)
+    //
+    // This raw byte layout MUST match Solidity's abi.encode(GuestOutput) where
+    // GuestOutput is (bytes32, bytes32, bytes20). Solidity ABI-encodes bytes20
+    // as a 32-byte word with the 20-byte value left-aligned and 12 zero bytes
+    // right-padded. Changing this format will break on-chain verification.
     let mut journal = [0u8; 96];
     journal[0..32].copy_from_slice(&input.merkle_root);
     journal[32..64].copy_from_slice(&nullifier);
