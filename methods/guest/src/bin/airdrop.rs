@@ -1,8 +1,4 @@
-use k256::{
-    ecdsa::signature::DigestSigner,
-    elliptic_curve::{sec1::ToEncodedPoint, FieldBytes},
-    SecretKey,
-};
+use k256::{elliptic_curve::sec1::ToEncodedPoint, SecretKey};
 use risc0_zkvm::guest::env;
 use sha2::{Digest, Sha256};
 use tiny_keccak::{Hasher, Keccak};
@@ -107,8 +103,18 @@ fn main() {
     leaf.copy_from_slice(&leaf_hash);
 
     assert!(
+        leaf == input.merkle_proof.leaf,
+        "derived leaf does not match proof leaf"
+    );
+
+    assert!(
         verify_merkle_proof(&input.merkle_proof, &input.merkle_root),
         "Merkle proof verification failed"
+    );
+
+    assert!(
+        input.claimant_address != [0u8; 20],
+        "claimant address cannot be zero"
     );
 
     let nullifier = compute_nullifier(

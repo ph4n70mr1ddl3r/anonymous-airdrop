@@ -43,6 +43,9 @@ contract AnonymousAirdrop is Ownable {
         bytes32 _merkleRoot,
         uint256 _amountPerClaim
     ) Ownable(msg.sender) {
+        require(address(_verifier) != address(0), "zero verifier address");
+        require(address(_token) != address(0), "zero token address");
+        require(_amountPerClaim > 0, "zero claim amount");
         verifier = _verifier;
         imageId = _imageId;
         token = _token;

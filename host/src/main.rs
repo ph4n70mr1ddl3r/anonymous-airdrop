@@ -133,7 +133,6 @@ pub fn parse_csv(csv_path: &PathBuf) -> Result<Vec<([u8; 20], u64)>> {
     let file = File::open(csv_path).context("Failed to open CSV file")?;
     let reader = BufReader::new(file);
     let mut entries = Vec::new();
-    let mut duplicates = 0u64;
 
     for (line_idx, line) in reader.lines().enumerate() {
         let line = line?;
@@ -166,10 +165,6 @@ pub fn parse_csv(csv_path: &PathBuf) -> Result<Vec<([u8; 20], u64)>> {
         let mut address = [0u8; 20];
         address.copy_from_slice(&address_bytes);
         entries.push((address, line_idx as u64));
-    }
-
-    if duplicates > 0 {
-        eprintln!("WARNING: {} duplicate addresses were skipped", duplicates);
     }
 
     Ok(entries)

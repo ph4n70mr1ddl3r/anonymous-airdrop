@@ -272,6 +272,39 @@ contract AnonymousAirdropTest is Test {
         assertEq(airdrop.totalClaimants(), numUsers);
         assertEq(airdrop.totalClaimed(), totalExpected);
     }
+
+    function testCannotDeployWithZeroVerifier() public {
+        vm.expectRevert("zero verifier address");
+        new AnonymousAirdrop(
+            IRiscZeroVerifier(address(0)),
+            imageId,
+            IERC20(address(token)),
+            merkleRoot,
+            amountPerClaim
+        );
+    }
+
+    function testCannotDeployWithZeroToken() public {
+        vm.expectRevert("zero token address");
+        new AnonymousAirdrop(
+            mockVerifier,
+            imageId,
+            IERC20(address(0)),
+            merkleRoot,
+            amountPerClaim
+        );
+    }
+
+    function testCannotDeployWithZeroAmount() public {
+        vm.expectRevert("zero claim amount");
+        new AnonymousAirdrop(
+            mockVerifier,
+            imageId,
+            IERC20(address(token)),
+            merkleRoot,
+            0
+        );
+    }
 }
 
 contract MockVerifier is IRiscZeroVerifier {

@@ -208,9 +208,11 @@ cast send $AIRDROP_CONTRACT_ADDRESS \
 A user who knows the private key of an eligible address:
 
 ```bash
+export PRIVATE_KEY=0x<eligible_account_private_key>
+
 cargo run --release -- generate-proof \
     --tree-file merkle_tree.json \
-    --private-key 0x<eligible_account_private_key> \
+    --csv eligible_addresses.csv \
     --claimant 0x<your_receiving_address> \
     --contract 0x<airdrop_contract_address> \
     --chain-id 10 \

@@ -12,8 +12,6 @@ sha2 = { workspace = true }
 tiny-keccak = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
-csv = { workspace = true }
 hex = { workspace = true }
 clap = { version = "4.5", features = ["derive"] }
-tokio = { version = "1", features = ["full"] }
 anyhow = "1.0"
