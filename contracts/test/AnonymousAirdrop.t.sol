@@ -33,7 +33,8 @@ import {
     WrongAirdropContract,
     WrongChainId,
     DeadlineNotPassed,
-    RenounceDisabled
+    RenounceDisabled,
+    InvalidWithdrawAddress
 } from "../src/AnonymousAirdrop.sol";
 import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
@@ -777,9 +778,8 @@ contract AnonymousAirdropTest is Test {
         airdrop.pauseClaims();
 
         vm.prank(owner);
+        vm.expectRevert(InvalidWithdrawAddress.selector);
         airdrop.emergencyWithdraw(address(airdrop));
-
-        assertEq(token.balanceOf(address(airdrop)), 100000 * 10 ** 18);
     }
 }
 
@@ -1097,7 +1097,6 @@ contract ReentrancyTest is Test {
 
 contract AirdropHandler is Test {
     AnonymousAirdrop public airdrop;
-    ERC20Mock public token;
     address public owner;
 
     uint256 public ghost_totalClaimed;
@@ -1106,7 +1105,6 @@ contract AirdropHandler is Test {
 
     constructor(AnonymousAirdrop _airdrop, ERC20Mock _token, address _owner) {
         airdrop = _airdrop;
-        token = _token;
         owner = _owner;
         initialDeposit = _token.balanceOf(address(_airdrop));
     }
@@ -1151,8 +1149,17 @@ contract AirdropHandler is Test {
         if (airdrop.closed()) return;
         if (claimsActive()) return;
         if (to == address(0)) return;
+        if (to == address(address(airdrop))) return;
         vm.prank(owner);
         try airdrop.emergencyWithdraw(to) {} catch {}
+    }
+
+    function withdrawAfterDeadline() external {
+        if (airdrop.closed()) return;
+        if (claimsActive()) return;
+        if (airdrop.claimDeadline() == 0) return;
+        if (block.timestamp <= airdrop.claimDeadline()) return;
+        try airdrop.withdrawAfterDeadline() {} catch {}
     }
 
     function claimsActive() internal view returns (bool) {
@@ -1182,11 +1189,12 @@ contract AnonymousAirdropInvariantTest is Test {
 
         handler = new AirdropHandler(airdrop, token, owner);
 
-        bytes4[] memory selectors = new bytes4[](4);
+        bytes4[] memory selectors = new bytes4[](5);
         selectors[0] = handler.claim.selector;
         selectors[1] = handler.startClaims.selector;
         selectors[2] = handler.pauseClaims.selector;
         selectors[3] = handler.emergencyWithdraw.selector;
+        selectors[4] = handler.withdrawAfterDeadline.selector;
         targetSelector(FuzzSelector({addr: address(handler), selectors: selectors}));
     }
 

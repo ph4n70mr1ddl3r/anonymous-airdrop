@@ -27,7 +27,7 @@ test-solidity:
 	forge test -vvv --root contracts
 
 lint:
-	cargo clippy --release -- -D warnings
+	cargo clippy -- -D warnings
 	forge fmt --check --root contracts
 
 clean:

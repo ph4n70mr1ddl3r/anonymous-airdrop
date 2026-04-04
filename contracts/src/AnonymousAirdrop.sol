@@ -35,6 +35,7 @@ error EthDepositRejected();
 error WrongAirdropContract();
 error WrongChainId();
 error DeadlineNotPassed();
+error InvalidWithdrawAddress();
 error RenounceDisabled();
 
 struct GuestOutput {
@@ -138,10 +139,11 @@ contract AnonymousAirdrop is Ownable2Step, ReentrancyGuard {
         verifier.verify(seal, imageId, sha256(journal));
 
         nullifiers[expectedNullifier] = true;
-        totalClaimed += amountPerClaim;
         totalClaimants++;
 
+        uint256 balanceBefore = token.balanceOf(address(this));
         token.safeTransfer(msg.sender, amountPerClaim);
+        totalClaimed += balanceBefore - token.balanceOf(address(this));
 
         emit Claimed(expectedNullifier, address(output.claimantAddress), amountPerClaim);
     }
@@ -166,15 +168,18 @@ contract AnonymousAirdrop is Ownable2Step, ReentrancyGuard {
         if (closed) revert AirdropAlreadyClosed();
         if (claimsActive) revert ClaimsStillActive();
         if (to == address(0)) revert ZeroWithdrawAddress();
+        if (to == address(this)) revert InvalidWithdrawAddress();
         uint256 balance = token.balanceOf(address(this));
         if (balance == 0) revert NoTokensToWithdraw();
         closed = true;
+        claimsActive = false;
         token.safeTransfer(to, balance);
         emit AirdropClosed();
         emit EmergencyWithdraw(to, balance);
     }
 
     /// @notice Rescue ERC20 tokens sent to this contract after airdrop is closed
+    ///         Can rescue any ERC20 including the airdrop token itself if re-sent after close.
     /// @param to Address to receive the rescued tokens
     /// @param tokenContract The ERC20 token contract to rescue
     function rescueTokens(address to, IERC20 tokenContract) external onlyOwner nonReentrant {

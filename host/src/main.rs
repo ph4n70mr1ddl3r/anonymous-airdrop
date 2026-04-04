@@ -3,7 +3,7 @@ use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 use k256::SecretKey;
 use methods::{AIRDROP_ELF, AIRDROP_ID};
-use risc0_zkvm::{ExecutorEnv, Receipt, default_prover};
+use risc0_zkvm::{default_prover, ExecutorEnv, Receipt};
 use sha2::{Digest, Sha256};
 use std::{
     collections::{HashMap, HashSet},
@@ -273,7 +273,7 @@ pub fn build_tree_from_csv(csv_path: &Path) -> Result<(MerkleTree, [u8; 32], Add
 
     if addresses.len() > 1_000_000 {
         eprintln!(
-            "Warning: Building tree with {} leaves. This may require significant memory (~2GB per 1M leaves).",
+            "Warning: Building tree with {} leaves. This may require significant memory (~64MB per 1M leaves).",
             addresses.len()
         );
     }

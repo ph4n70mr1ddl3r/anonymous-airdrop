@@ -2,9 +2,9 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [master]
   pull_request:
-    branches: [main]
+    branches: [master]
 
 env:
   CARGO_TERM_COLOR: always
@@ -70,8 +70,8 @@ jobs:
       - name: Install Foundry dependencies
         run: |
           cd contracts
-          forge install risc0/risc0-ethereum --no-commit
-          forge install OpenZeppelin/openzeppelin-contracts --no-commit
+          forge install risc0/risc0-ethereum --no-commit --force
+          forge install OpenZeppelin/openzeppelin-contracts --no-commit --force
 
       - name: Run Solidity tests
         run: |
