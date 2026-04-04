@@ -212,6 +212,7 @@ contract AnonymousAirdrop is Ownable2Step, ReentrancyGuard {
         if (claimsActive) revert ClaimsStillActive();
         address to = owner();
         if (to == address(0)) revert ZeroWithdrawAddress();
+        if (to == address(this)) revert InvalidWithdrawAddress();
         uint256 balance = token.balanceOf(address(this));
         if (balance == 0) revert NoTokensToWithdraw();
         closed = true;

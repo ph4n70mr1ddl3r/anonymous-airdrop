@@ -7,7 +7,7 @@ exclude = ["methods/guest"]
 risc0-zkvm = { version = "3.0", default-features = false }
 k256 = { version = "0.13", features = ["arithmetic", "serde", "expose-field", "std", "ecdsa"] }
 sha2 = "0.10"
-tiny-keccak = { version = "2.0", features = ["sha3", "keccak"] }
+tiny-keccak = { version = "2.0", features = ["keccak"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 hex = "0.4"

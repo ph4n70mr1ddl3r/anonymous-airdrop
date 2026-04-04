@@ -481,14 +481,12 @@ contract AnonymousAirdropTest is Test {
 
     function testCannotSendEth() public {
         vm.expectRevert(EthDepositRejected.selector);
-        (bool s,) = address(airdrop).call{value: 1 ether}("");
-        s;
+        address(airdrop).call{value: 1 ether}("");
     }
 
     function testFallbackReverts() public {
         vm.expectRevert(EthDepositRejected.selector);
-        (bool s,) = address(airdrop).call{value: 0}("nonExistentFunction()");
-        s;
+        address(airdrop).call{value: 0}("nonExistentFunction()");
     }
 
     function testCannotEmergencyWithdrawAfterClose() public {
@@ -999,6 +997,23 @@ contract AnonymousAirdropDeadlineTest is Test {
         vm.prank(nonOwner);
         airdrop.withdrawAfterDeadline();
     }
+
+    function testCannotWithdrawAfterDeadlineToContractItself() public {
+        vm.prank(owner);
+        airdrop.startClaims();
+        vm.prank(owner);
+        airdrop.pauseClaims();
+
+        vm.warp(claimDeadline + 1);
+
+        vm.prank(owner);
+        airdrop.transferOwnership(address(airdrop));
+        vm.prank(address(airdrop));
+        airdrop.acceptOwnership();
+
+        vm.expectRevert(InvalidWithdrawAddress.selector);
+        airdrop.withdrawAfterDeadline();
+    }
 }
 
 contract MockVerifier is IRiscZeroVerifier {
@@ -1114,6 +1129,7 @@ contract AirdropHandler is Test {
         if (airdrop.claimDeadline() != 0 && block.timestamp > airdrop.claimDeadline()) return;
         if (airdrop.isClaimed(nullifier)) return;
         if (claimant_ == address(0)) return;
+        if (claimant_ == address(airdrop)) return;
 
         bytes20 claimant20 = bytes20(uint160(claimant_));
         GuestOutput memory output = GuestOutput({

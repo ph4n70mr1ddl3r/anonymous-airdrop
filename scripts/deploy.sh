@@ -111,8 +111,13 @@ echo ""
 
 echo "Step 5: Transferring tokens to airdrop contract..."
 
-ADDRESS_COUNT=$(grep -ciE '^0x[0-9a-fA-F]{40}([, ]|$)' "$ELIGIBLE_CSV" || true)
-echo "Found $ADDRESS_COUNT eligible addresses in CSV"
+if [ -f "merkle_tree.json" ]; then
+    ADDRESS_COUNT=$(jq '.total_leaves' merkle_tree.json)
+else
+    echo "Warning: merkle_tree.json not found, counting addresses from CSV (may be inaccurate)"
+    ADDRESS_COUNT=$(grep -ciE '^0x[0-9a-fA-F]{40}([, ]|$)' "$ELIGIBLE_CSV" || true)
+fi
+echo "Found $ADDRESS_COUNT eligible addresses"
 
 TOTAL_TOKENS=$(python3 -c "print($AMOUNT_PER_CLAIM * $ADDRESS_COUNT)" 2>/dev/null || \
     echo "$AMOUNT_PER_CLAIM $ADDRESS_COUNT" | awk '{printf "%.0f\n", $1 * $2}')

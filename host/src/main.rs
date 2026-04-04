@@ -3,7 +3,7 @@ use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 use k256::SecretKey;
 use methods::{AIRDROP_ELF, AIRDROP_ID};
-use risc0_zkvm::{default_prover, ExecutorEnv, Receipt};
+use risc0_zkvm::{ExecutorEnv, Receipt, default_prover};
 use sha2::{Digest, Sha256};
 use std::{
     collections::{HashMap, HashSet},
@@ -74,7 +74,7 @@ fn decode_journal_output(journal_bytes: &[u8]) -> Result<GuestOutput> {
     })
 }
 
-const MAX_LEAVES: usize = 1 << 31;
+const MAX_LEAVES: usize = 1 << 32;
 
 #[must_use]
 fn sha256_pair(left: &[u8; 32], right: &[u8; 32]) -> [u8; 32] {
@@ -271,9 +271,9 @@ pub fn build_tree_from_csv(csv_path: &Path) -> Result<(MerkleTree, [u8; 32], Add
         );
     }
 
-    if addresses.len() > 1_000_000 {
+    if addresses.len() > 10_000_000 {
         eprintln!(
-            "Warning: Building tree with {} leaves. This may require significant memory (~64MB per 1M leaves).",
+            "Warning: Building tree with {} leaves. This may require significant memory (~2GB+ for 32M leaves).",
             addresses.len()
         );
     }
@@ -571,6 +571,13 @@ fn main() -> Result<()> {
                     addr.copy_from_slice(&addr_bytes);
                     address_to_index.insert(addr, idx);
                 }
+
+                anyhow::ensure!(
+                    leaves.len() == address_to_index.len(),
+                    "Inconsistent tree file: {} leaves but {} address entries",
+                    leaves.len(),
+                    address_to_index.len()
+                );
 
                 let (tree, root) = build_tree_from_saved(&leaves);
                 anyhow::ensure!(

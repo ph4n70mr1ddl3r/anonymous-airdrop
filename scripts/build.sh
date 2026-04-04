@@ -17,7 +17,7 @@ echo "Step 1: Building RISC Zero guest program..."
 echo "This will compile the zkVM guest and generate the ImageID"
 echo ""
 
-export RISC0_DEV_MODE=${RISC0_DEV_MODE:-1}
+export RISC0_DEV_MODE=${RISC0_DEV_MODE:-0}
 
 cargo build --release 2>&1 | tee build.log
 
