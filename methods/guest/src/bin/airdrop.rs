@@ -92,10 +92,10 @@ fn verify_merkle_proof(proof: &MerkleProof, root: &[u8; 32]) -> bool {
 fn main() {
     let mut input: GuestInput = env::read();
 
-    if input.private_key_bytes == [0u8; 32] {
-        panic!("zero private key");
-    }
-
+    assert!(
+        input.private_key_bytes != [0u8; 32],
+        "private key cannot be zero"
+    );
     assert!(
         input.airdrop_contract != [0u8; 20],
         "airdrop contract cannot be zero"

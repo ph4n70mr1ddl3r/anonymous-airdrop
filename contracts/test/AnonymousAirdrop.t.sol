@@ -240,7 +240,13 @@ contract AnonymousAirdropTest is Test {
         airdrop.startClaims();
 
         vm.prank(owner);
-        IERC20(address(token)).transfer(address(0x4), token.balanceOf(address(airdrop)) - 1);
+        airdrop.pauseClaims();
+        
+        vm.prank(owner);
+        airdrop.emergencyWithdraw(owner);
+        
+        vm.prank(owner);
+        airdrop.startClaims();
 
         bytes32 nullifier = keccak256("test-nullifier");
         bytes20 claimant20 = bytes20(uint160(claimant));
@@ -418,7 +424,7 @@ contract AnonymousAirdropTest is Test {
         airdrop.pauseClaims();
 
         vm.prank(owner);
-        IERC20(address(token)).transfer(address(0x4), token.balanceOf(address(airdrop)));
+        airdrop.emergencyWithdraw(owner);
 
         vm.expectRevert("No tokens to withdraw");
         vm.prank(owner);
@@ -536,6 +542,7 @@ contract AnonymousAirdropDeadlineTest is Test {
     }
 
     function testCannotDeployWithPastDeadline() public {
+        vm.warp(1000);
         vm.expectRevert("deadline must be future or zero");
         new AnonymousAirdrop(
             mockVerifier,
