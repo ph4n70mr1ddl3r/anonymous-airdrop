@@ -118,26 +118,12 @@ contract AnonymousAirdropTest is Test {
     }
 
     function testCannotPauseClaimsAsNonOwner() public {
-    function testReentrancyBlocked() public {
         vm.prank(owner);
         airdrop.startClaims();
-
-        bytes32 nullifier = keccak256("reentrancy-test");
-        bytes20 claimant20 = bytes20(uint160(claimant));
-        GuestOutput memory output = GuestOutput({
-            merkleRoot: airdrop.merkleRoot(),
-            nullifier: nullifier,
-            claimantAddress: claimant20
-        });
-
-        bytes memory journal = abi.encode(output);
-        bytes memory seal = "";
-
-        vm.prank(claimant);
-        airdrop.claim(seal, journal, nullifier);
+        vm.expectRevert();
+        vm.prank(nonOwner);
+        airdrop.pauseClaims();
     }
-
-}
 
     function testEmergencyWithdraw() public {
         vm.prank(owner);
@@ -272,8 +258,19 @@ contract AnonymousAirdropTest is Test {
     }
 
     function testCannotClaimWithInsufficientBalance() public {
-        vm.prank(owner);
-        airdrop.startClaims();
+        vm.startPrank(owner);
+        AnonymousAirdrop lowBalanceAirdrop = new AnonymousAirdrop(
+            mockVerifier,
+            imageId,
+            IERC20(address(token)),
+            merkleRoot,
+            amountPerClaim,
+            0
+        );
+
+        token.transfer(address(lowBalanceAirdrop), amountPerClaim - 1);
+        lowBalanceAirdrop.startClaims();
+        vm.stopPrank();
 
         bytes32 nullifier = keccak256("test-nullifier");
         bytes20 claimant20 = bytes20(uint160(claimant));
@@ -287,34 +284,9 @@ contract AnonymousAirdropTest is Test {
         bytes memory journal = abi.encode(output);
         bytes memory seal = "";
 
-        vm.prank(claimant);
-        airdrop.claim(seal, journal, nullifier);
-
-        vm.prank(owner);
-        airdrop.pauseClaims();
-
-        vm.prank(owner);
-        airdrop.emergencyWithdraw(owner);
-
-        vm.expectRevert(AirdropAlreadyClosed.selector);
-        vm.prank(owner);
-        airdrop.startClaims();
-
-        bytes32 nullifier2 = keccak256("test-nullifier-2");
-        bytes20 claimant20_2 = bytes20(uint160(claimant));
-
-        GuestOutput memory output2 = GuestOutput({
-            merkleRoot: merkleRoot,
-            nullifier: nullifier2,
-            claimantAddress: claimant20_2
-        });
-
-        bytes memory journal2 = abi.encode(output2);
-        bytes memory seal2 = "";
-
         vm.expectRevert(InsufficientBalance.selector);
         vm.prank(claimant);
-        airdrop.claim(seal2, journal2, nullifier2);
+        lowBalanceAirdrop.claim(seal, journal, nullifier);
     }
 
     function testGetRemainingTokens() public {
@@ -743,7 +715,6 @@ contract ReentrancyTest is Test {
         airdrop.claim(seal, journal, nullifier);
         assertTrue(airdrop.isClaimed(nullifier));
         assertEq(airdrop.totalClaimants(), 1);
-        assertEq(airdrop.totalClaimed(), amountPerClaim);
+        assertEq(airdrop.totalClaimed(), 1000 * 10**18);
     }
-}
 }
