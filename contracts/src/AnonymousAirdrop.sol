@@ -199,6 +199,8 @@ contract AnonymousAirdrop is Ownable2Step, ReentrancyGuard {
         return nullifiers[nullifier];
     }
 
+    /// @notice Allow anyone to withdraw remaining tokens to the owner after the claim deadline has passed
+    ///         Requires claims to be paused first. Tokens are sent to the current owner.
     function withdrawAfterDeadline() external nonReentrant {
         if (closed) revert AirdropAlreadyClosed();
         if (claimDeadline == 0 || block.timestamp <= claimDeadline) revert DeadlineNotPassed();
@@ -213,6 +215,7 @@ contract AnonymousAirdrop is Ownable2Step, ReentrancyGuard {
         emit EmergencyWithdraw(to, balance);
     }
 
+    /// @notice Disabled - ownership renunciation is not allowed to maintain a responsible party
     function renounceOwnership() public view override onlyOwner {
         revert RenounceDisabled();
     }

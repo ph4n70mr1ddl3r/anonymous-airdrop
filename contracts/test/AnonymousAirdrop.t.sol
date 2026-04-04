@@ -78,7 +78,7 @@ contract AnonymousAirdropTest is Test {
         vm.stopPrank();
     }
 
-    function testInitialState() public {
+    function testInitialState() public view {
         assertEq(address(airdrop.token()), address(token));
         assertEq(airdrop.merkleRoot(), merkleRoot);
         assertEq(airdrop.amountPerClaim(), amountPerClaim);
@@ -304,7 +304,7 @@ contract AnonymousAirdropTest is Test {
         lowBalanceAirdrop.claim(seal, journal, nullifier);
     }
 
-    function testGetRemainingTokens() public {
+    function testGetRemainingTokens() public view {
         uint256 balance = airdrop.getRemainingTokens();
         assertEq(balance, 100000 * 10 ** 18);
     }
@@ -480,14 +480,14 @@ contract AnonymousAirdropTest is Test {
 
     function testCannotSendEth() public {
         vm.expectRevert(EthDepositRejected.selector);
-        (bool success,) = address(airdrop).call{value: 1 ether}("");
-        success;
+        (bool s,) = address(airdrop).call{value: 1 ether}("");
+        s;
     }
 
     function testFallbackReverts() public {
         vm.expectRevert(EthDepositRejected.selector);
-        (bool success,) = address(airdrop).call{value: 0}("nonExistentFunction()");
-        success;
+        (bool s,) = address(airdrop).call{value: 0}("nonExistentFunction()");
+        s;
     }
 
     function testCannotEmergencyWithdrawAfterClose() public {
@@ -638,6 +638,40 @@ contract AnonymousAirdropTest is Test {
         vm.prank(owner);
         airdrop.rescueTokens(owner, IERC20(address(otherToken)));
     }
+
+    function testOwnershipTransferTwoStep() public {
+        address newOwner = address(0xABC);
+
+        vm.prank(owner);
+        airdrop.transferOwnership(newOwner);
+        assertEq(airdrop.pendingOwner(), newOwner);
+        assertEq(airdrop.owner(), owner);
+
+        vm.prank(newOwner);
+        airdrop.acceptOwnership();
+        assertEq(airdrop.owner(), newOwner);
+        assertEq(airdrop.pendingOwner(), address(0));
+    }
+
+    function testRescueAirdropTokenResentAfterClose() public {
+        vm.prank(owner);
+        airdrop.startClaims();
+        vm.prank(owner);
+        airdrop.pauseClaims();
+        vm.prank(owner);
+        airdrop.emergencyWithdraw(address(this));
+
+        uint256 ownerBalanceBefore = token.balanceOf(owner);
+
+        vm.prank(owner);
+        token.transfer(address(airdrop), 500 * 10 ** 18);
+
+        vm.prank(owner);
+        airdrop.rescueTokens(owner, IERC20(address(token)));
+
+        assertEq(token.balanceOf(address(airdrop)), 0);
+        assertEq(token.balanceOf(owner), ownerBalanceBefore);
+    }
 }
 
 contract AnonymousAirdropDeadlineTest is Test {
@@ -672,7 +706,7 @@ contract AnonymousAirdropDeadlineTest is Test {
         vm.stopPrank();
     }
 
-    function testDeadlineSet() public {
+    function testDeadlineSet() public view {
         assertEq(airdrop.claimDeadline(), claimDeadline);
     }
 
@@ -928,11 +962,13 @@ contract AirdropHandler is Test {
 
     uint256 public ghost_totalClaimed;
     uint256 public ghost_totalClaimants;
+    uint256 public initialDeposit;
 
     constructor(AnonymousAirdrop _airdrop, ERC20Mock _token, address _owner) {
         airdrop = _airdrop;
         token = _token;
         owner = _owner;
+        initialDeposit = _token.balanceOf(address(_airdrop));
     }
 
     function claim(bytes32 nullifier, address claimant_) external {
@@ -970,6 +1006,18 @@ contract AirdropHandler is Test {
         vm.prank(owner);
         try airdrop.pauseClaims() {} catch {}
     }
+
+    function emergencyWithdraw(address to) external {
+        if (airdrop.closed()) return;
+        if (claimsActive()) return;
+        if (to == address(0)) return;
+        vm.prank(owner);
+        try airdrop.emergencyWithdraw(to) {} catch {}
+    }
+
+    function claimsActive() internal view returns (bool) {
+        return airdrop.claimsActive();
+    }
 }
 
 contract AnonymousAirdropInvariantTest is Test {
@@ -994,10 +1042,11 @@ contract AnonymousAirdropInvariantTest is Test {
 
         handler = new AirdropHandler(airdrop, token, owner);
 
-        bytes4[] memory selectors = new bytes4[](3);
+        bytes4[] memory selectors = new bytes4[](4);
         selectors[0] = handler.claim.selector;
         selectors[1] = handler.startClaims.selector;
         selectors[2] = handler.pauseClaims.selector;
+        selectors[3] = handler.emergencyWithdraw.selector;
         targetSelector(FuzzSelector({addr: address(handler), selectors: selectors}));
     }
 
@@ -1021,5 +1070,15 @@ contract AnonymousAirdropInvariantTest is Test {
 
     function invariant_claimantsAndClaimedConsistent() public view {
         assertEq(airdrop.totalClaimants() > 0, airdrop.totalClaimed() > 0);
+    }
+
+    function invariant_balanceNeverExceedsInitialDeposit() public view {
+        assertLe(token.balanceOf(address(airdrop)), 100_000 * 10 ** 18);
+    }
+
+    function invariant_claimedPlusBalanceMatchesUnlessClosed() public view {
+        if (!airdrop.closed()) {
+            assertEq(airdrop.totalClaimed() + token.balanceOf(address(airdrop)), 100_000 * 10 ** 18);
+        }
     }
 }
