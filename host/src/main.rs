@@ -3,7 +3,7 @@ use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 use k256::SecretKey;
 use methods::{AIRDROP_ELF, AIRDROP_ID};
-use risc0_zkvm::{default_prover, ExecutorEnv, Receipt};
+use risc0_zkvm::{ExecutorEnv, Receipt, default_prover};
 use sha2::{Digest, Sha256};
 use std::{
     collections::{HashMap, HashSet},
@@ -73,6 +73,8 @@ fn decode_journal_output(journal_bytes: &[u8]) -> Result<GuestOutput> {
         chain_id,
     })
 }
+
+const MAX_LEAVES: usize = 1 << 31;
 
 #[must_use]
 fn sha256_pair(left: &[u8; 32], right: &[u8; 32]) -> [u8; 32] {
@@ -202,9 +204,7 @@ pub fn parse_csv(csv_path: &Path) -> Result<Vec<[u8; 20]>> {
         }
 
         let hex_part = &address_str[2..];
-        let lower = hex_part.to_lowercase();
-        let normalized = format!("0x{}", lower);
-        let address_bytes = hex::decode(&lower)
+        let address_bytes = hex::decode(hex_part.to_lowercase())
             .context(format!("Failed to decode hex address: {}", address_str))?;
 
         if address_bytes.len() != 20 {
@@ -212,16 +212,14 @@ pub fn parse_csv(csv_path: &Path) -> Result<Vec<[u8; 20]>> {
             continue;
         }
 
-        if address_str != normalized {
-            let has_upper = hex_part.chars().any(|c| c.is_ascii_uppercase());
-            let has_lower = hex_part.chars().any(|c| c.is_ascii_lowercase());
-            if has_upper && has_lower {
-                eprintln!(
-                    "Warning: Address at line {} may have invalid EIP-55 checksum: {}",
-                    line_idx + 1,
-                    address_str
-                );
-            }
+        let has_upper = hex_part.chars().any(|c| c.is_ascii_uppercase());
+        let has_lower = hex_part.chars().any(|c| c.is_ascii_lowercase());
+        if has_upper && has_lower {
+            eprintln!(
+                "Warning: Address at line {} may have invalid EIP-55 checksum: {}",
+                line_idx + 1,
+                address_str
+            );
         }
 
         let mut address = [0u8; 20];
@@ -262,6 +260,15 @@ pub fn build_tree_from_csv(csv_path: &Path) -> Result<(MerkleTree, [u8; 32], Add
 
     if addresses.is_empty() {
         anyhow::bail!("No valid addresses found in CSV. Cannot build Merkle tree.");
+    }
+
+    if addresses.len() > MAX_LEAVES {
+        anyhow::bail!(
+            "Too many addresses ({}): exceeds maximum of {}. Merkle tree supports at most 2^{} leaves.",
+            addresses.len(),
+            MAX_LEAVES,
+            MERKLE_TREE_DEPTH
+        );
     }
 
     if addresses.len() > 1_000_000 {
@@ -877,6 +884,20 @@ mod tests {
     fn test_parse_csv_no_file() {
         let result = parse_csv(&PathBuf::from("/nonexistent/file.csv"));
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_build_merkle_tree_max_leaves_not_exceeded() {
+        let leaves: Vec<[u8; 32]> = (0..100)
+            .map(|i| {
+                let mut leaf = [0u8; 32];
+                leaf[0] = i;
+                leaf
+            })
+            .collect();
+        let (tree, root) = build_merkle_tree(&leaves);
+        assert_eq!(tree[0].len(), 100);
+        assert_ne!(root, [0u8; 32]);
     }
 
     #[test]

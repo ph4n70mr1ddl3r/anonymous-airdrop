@@ -653,6 +653,85 @@ contract AnonymousAirdropTest is Test {
         assertEq(airdrop.pendingOwner(), address(0));
     }
 
+    function testEmitsClaimsStartedEvent() public {
+        vm.expectEmit(false, false, false, true);
+        emit AnonymousAirdrop.ClaimsStarted();
+        vm.prank(owner);
+        airdrop.startClaims();
+    }
+
+    function testEmitsClaimsPausedEvent() public {
+        vm.prank(owner);
+        airdrop.startClaims();
+
+        vm.expectEmit(false, false, false, true);
+        emit AnonymousAirdrop.ClaimsPaused();
+        vm.prank(owner);
+        airdrop.pauseClaims();
+    }
+
+    function testEmitsEmergencyWithdrawEvent() public {
+        vm.prank(owner);
+        airdrop.startClaims();
+        vm.prank(owner);
+        airdrop.pauseClaims();
+
+        uint256 contractBalance = token.balanceOf(address(airdrop));
+
+        vm.expectEmit(true, false, false, true);
+        emit AnonymousAirdrop.EmergencyWithdraw(address(this), contractBalance);
+        vm.prank(owner);
+        airdrop.emergencyWithdraw(address(this));
+    }
+
+    function testClaimDrainsEntireBalance() public {
+        uint256 exactAmount = 100000 * 10 ** 18;
+        uint256 numClaims = exactAmount / amountPerClaim;
+
+        vm.prank(owner);
+        airdrop.startClaims();
+
+        for (uint256 i = 0; i < numClaims; i++) {
+            bytes32 nullifier = keccak256(abi.encodePacked("drain", i));
+            address user = address(uint160(uint256(keccak256(abi.encodePacked("drain-addr", i)))));
+            bytes20 user20 = bytes20(uint160(user));
+
+            bytes memory journal = abi.encode(makeGuestOutput(nullifier, user20));
+            vm.prank(user);
+            airdrop.claim("", journal, nullifier);
+        }
+
+        assertEq(token.balanceOf(address(airdrop)), 0);
+        assertEq(airdrop.totalClaimants(), numClaims);
+        assertEq(airdrop.totalClaimed(), exactAmount);
+    }
+
+    function testCannotClaimAfterAllTokensDrained() public {
+        uint256 exactAmount = 100000 * 10 ** 18;
+        uint256 numClaims = exactAmount / amountPerClaim;
+
+        vm.prank(owner);
+        airdrop.startClaims();
+
+        for (uint256 i = 0; i < numClaims; i++) {
+            bytes32 nullifier = keccak256(abi.encodePacked("drain", i));
+            address user = address(uint160(uint256(keccak256(abi.encodePacked("drain-addr", i)))));
+            bytes20 user20 = bytes20(uint160(user));
+
+            bytes memory journal = abi.encode(makeGuestOutput(nullifier, user20));
+            vm.prank(user);
+            airdrop.claim("", journal, nullifier);
+        }
+
+        bytes32 extraNullifier = keccak256("extra");
+        bytes20 claimant20 = bytes20(uint160(claimant));
+        bytes memory journal = abi.encode(makeGuestOutput(extraNullifier, claimant20));
+
+        vm.expectRevert(InsufficientBalance.selector);
+        vm.prank(claimant);
+        airdrop.claim("", journal, extraNullifier);
+    }
+
     function testRescueAirdropTokenResentAfterClose() public {
         vm.prank(owner);
         airdrop.startClaims();
@@ -671,6 +750,36 @@ contract AnonymousAirdropTest is Test {
 
         assertEq(token.balanceOf(address(airdrop)), 0);
         assertEq(token.balanceOf(owner), ownerBalanceBefore);
+    }
+
+    function testEmitsTokensRescuedEvent() public {
+        vm.prank(owner);
+        airdrop.startClaims();
+        vm.prank(owner);
+        airdrop.pauseClaims();
+        vm.prank(owner);
+        airdrop.emergencyWithdraw(address(this));
+
+        ERC20Mock otherToken = new ERC20Mock("Other", "OTH", owner, 10000 * 10 ** 18);
+        vm.prank(owner);
+        otherToken.transfer(address(airdrop), 500 * 10 ** 18);
+
+        vm.expectEmit(true, true, false, true);
+        emit AnonymousAirdrop.TokensRescued(owner, address(otherToken), 500 * 10 ** 18);
+        vm.prank(owner);
+        airdrop.rescueTokens(owner, IERC20(address(otherToken)));
+    }
+
+    function testCannotEmergencyWithdrawToContractItself() public {
+        vm.prank(owner);
+        airdrop.startClaims();
+        vm.prank(owner);
+        airdrop.pauseClaims();
+
+        vm.prank(owner);
+        airdrop.emergencyWithdraw(address(airdrop));
+
+        assertEq(token.balanceOf(address(airdrop)), 100000 * 10 ** 18);
     }
 }
 
@@ -856,6 +965,37 @@ contract AnonymousAirdropDeadlineTest is Test {
         vm.warp(claimDeadline + 1);
 
         vm.expectRevert(AirdropAlreadyClosed.selector);
+        vm.prank(nonOwner);
+        airdrop.withdrawAfterDeadline();
+    }
+
+    function testCannotWithdrawAfterDeadlineWithZeroBalance() public {
+        AnonymousAirdrop unfundedAirdrop = new AnonymousAirdrop(
+            mockVerifier, imageId, IERC20(address(token)), merkleRoot, amountPerClaim, claimDeadline
+        );
+
+        vm.warp(claimDeadline + 1);
+
+        vm.expectRevert(NoTokensToWithdraw.selector);
+        unfundedAirdrop.withdrawAfterDeadline();
+    }
+
+    function testWithdrawAfterDeadlineEmitsEvents() public {
+        vm.prank(owner);
+        airdrop.startClaims();
+        vm.prank(owner);
+        airdrop.pauseClaims();
+
+        vm.warp(claimDeadline + 1);
+
+        uint256 contractBalance = token.balanceOf(address(airdrop));
+
+        vm.expectEmit(false, false, false, true);
+        emit AnonymousAirdrop.AirdropClosed();
+
+        vm.expectEmit(true, false, false, true);
+        emit AnonymousAirdrop.EmergencyWithdraw(owner, contractBalance);
+
         vm.prank(nonOwner);
         airdrop.withdrawAfterDeadline();
     }

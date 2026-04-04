@@ -51,6 +51,22 @@ jobs:
       - name: Install Foundry
         uses: foundry-rs/foundry-toolchain@v1
 
+      - name: Cache Foundry dependencies
+        uses: actions/cache@v4
+        with:
+          path: contracts/lib
+          key: ${{ runner.os }}-foundry-${{ hashFiles('contracts/package.json') }}
+          restore-keys: ${{ runner.os }}-foundry-
+
+      - name: Cache Foundry build artifacts
+        uses: actions/cache@v4
+        with:
+          path: |
+            contracts/cache
+            contracts/out
+          key: ${{ runner.os }}-foundry-build-${{ hashFiles('contracts/src/**/*.sol') }}
+          restore-keys: ${{ runner.os }}-foundry-build-
+
       - name: Install Foundry dependencies
         run: |
           cd contracts
