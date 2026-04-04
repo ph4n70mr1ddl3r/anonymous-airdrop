@@ -90,6 +90,7 @@ contract AnonymousAirdrop is Ownable, ReentrancyGuard {
         require(claimsActive, "Claims not active");
         require(!nullifiers[expectedNullifier], "Already claimed");
         require(claimDeadline == 0 || block.timestamp <= claimDeadline, "Claim period ended");
+        require(journal.length == 96, "Invalid journal length");
         require(token.balanceOf(address(this)) >= amountPerClaim, "Insufficient airdrop balance");
 
         verifier.verify(seal, imageId, sha256(journal));
@@ -105,7 +106,7 @@ contract AnonymousAirdrop is Ownable, ReentrancyGuard {
         totalClaimed += amountPerClaim;
         totalClaimants++;
 
-        token.safeTransfer(output.claimantAddress, amountPerClaim);
+        token.safeTransfer(address(uint160(output.claimantAddress)), amountPerClaim);
 
         emit Claimed(
             expectedNullifier,

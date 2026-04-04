@@ -9,7 +9,6 @@ k256 = { version = "0.13", features = ["arithmetic", "serde", "expose-field", "s
 sha2 = "0.10"
 tiny-keccak = { version = "2.0", features = ["keccak"] }
 serde = { version = "1.0", features = ["derive"] }
-hex = "0.4"
 
 [workspace]
 

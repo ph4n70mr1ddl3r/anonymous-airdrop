@@ -90,7 +90,7 @@ fn verify_merkle_proof(proof: &MerkleProof, root: &[u8; 32]) -> bool {
 }
 
 fn main() {
-    let input: GuestInput = env::read();
+    let mut input: GuestInput = env::read();
 
     if input.private_key_bytes == [0u8; 32] {
         panic!("zero private key");
@@ -130,6 +130,8 @@ fn main() {
         &input.airdrop_contract,
         input.chain_id,
     );
+
+    input.private_key_bytes.fill(0);
 
     // Journal format: 96 bytes total
     //   [0..32]   merkle_root as bytes32

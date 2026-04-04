@@ -3,13 +3,13 @@ use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 use k256::SecretKey;
 use methods::{AIRDROP_ELF, AIRDROP_ID};
-use risc0_zkvm::{default_prover, ExecutorEnv, Receipt};
+use risc0_zkvm::{ExecutorEnv, Receipt, default_prover};
 use sha2::{Digest, Sha256};
 use std::{
     collections::{HashMap, HashSet},
     fs::File,
     io::{BufRead, BufReader},
-    path::PathBuf,
+    path::{Path, PathBuf},
 };
 use zeroize::Zeroize;
 
@@ -167,7 +167,7 @@ pub fn get_merkle_proof(tree: &[Vec<[u8; 32]>], index: u64) -> Result<MerkleProo
     Ok(MerkleProof { leaf, path, index })
 }
 
-pub fn parse_csv(csv_path: &PathBuf) -> Result<Vec<[u8; 20]>> {
+pub fn parse_csv(csv_path: &Path) -> Result<Vec<[u8; 20]>> {
     let file = File::open(csv_path).context("Failed to open CSV file")?;
     let reader = BufReader::new(file);
     let mut entries = Vec::new();
@@ -194,7 +194,7 @@ pub fn parse_csv(csv_path: &PathBuf) -> Result<Vec<[u8; 20]>> {
 
         let hex_part = &address_str[2..];
         let lower = hex_part.to_lowercase();
-        let checksummed = format!("0x{}", lower);
+        let normalized = format!("0x{}", lower);
         let address_bytes = hex::decode(&lower)
             .context(format!("Failed to decode hex address: {}", address_str))?;
 
@@ -203,7 +203,7 @@ pub fn parse_csv(csv_path: &PathBuf) -> Result<Vec<[u8; 20]>> {
             continue;
         }
 
-        if address_str != checksummed {
+        if address_str != normalized {
             let has_upper = hex_part.chars().any(|c| c.is_ascii_uppercase());
             let has_lower = hex_part.chars().any(|c| c.is_ascii_lowercase());
             if has_upper && has_lower {
@@ -226,7 +226,7 @@ pub fn parse_csv(csv_path: &PathBuf) -> Result<Vec<[u8; 20]>> {
 type MerkleTree = Vec<Vec<[u8; 32]>>;
 type AddressIndex = HashMap<[u8; 20], u64>;
 
-pub fn build_tree_from_csv(csv_path: &PathBuf) -> Result<(MerkleTree, [u8; 32], AddressIndex)> {
+pub fn build_tree_from_csv(csv_path: &Path) -> Result<(MerkleTree, [u8; 32], AddressIndex)> {
     println!("Parsing CSV file...");
     let entries = parse_csv(csv_path)?;
     println!("Parsed {} address entries from CSV", entries.len());

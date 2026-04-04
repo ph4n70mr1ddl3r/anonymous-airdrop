@@ -2,7 +2,7 @@
 pragma solidity ^0.8.28;
 
 import {Test} from "forge-std/Test.sol";
-import {IRiscZeroVerifier} from "@risc0/IRiscZeroVerifier.sol";
+import {IRiscZeroVerifier, Receipt} from "@risc0/IRiscZeroVerifier.sol";
 import {AnonymousAirdrop, GuestOutput} from "../src/AnonymousAirdrop.sol";
 import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
@@ -201,7 +201,7 @@ contract AnonymousAirdropTest is Test {
         bytes20 claimant20 = bytes20(uint160(claimant));
 
         GuestOutput memory output = GuestOutput({
-            merkleRoot: bytes32(0xDEADBEEF),
+            merkleRoot: bytes32(uint256(0xDEADBEEF)),
             nullifier: nullifier,
             claimantAddress: claimant20
         });
@@ -399,6 +399,16 @@ contract AnonymousAirdropTest is Test {
 
         vm.expectRevert("zero claimant address");
         airdrop.claim(seal, journal, nullifier);
+    }
+
+    function testCannotClaimWithInvalidJournalLength() public {
+        vm.prank(owner);
+        airdrop.startClaims();
+
+        bytes32 nullifier = keccak256("test-nullifier");
+
+        vm.expectRevert("Invalid journal length");
+        airdrop.claim("", "short", nullifier);
     }
 
     function testCannotEmergencyWithdrawWithNoTokens() public {

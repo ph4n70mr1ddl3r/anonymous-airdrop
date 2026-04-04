@@ -18,7 +18,6 @@ dependencies = [
 name = "airdrop-guest"
 version = "0.1.0"
 dependencies = [
- "hex",
  "k256",
  "risc0-zkvm",
  "serde",
