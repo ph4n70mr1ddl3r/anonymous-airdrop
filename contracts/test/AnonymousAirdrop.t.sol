@@ -7,6 +7,26 @@ import {AnonymousAirdrop, GuestOutput} from "../src/AnonymousAirdrop.sol";
 import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
+error ZeroVerifierAddress();
+error ZeroImageId();
+error ZeroTokenAddress();
+error ZeroMerkleRoot();
+error ZeroClaimAmount();
+error InvalidDeadline();
+error ClaimsNotActive();
+error AlreadyClaimed();
+error ClaimPeriodEnded();
+error InvalidJournalLength();
+error InsufficientBalance();
+error ZeroClaimantAddress();
+error NotClaimant();
+error ClaimsStillActive();
+error ZeroWithdrawAddress();
+error NoTokensToWithdraw();
+error AirdropAlreadyClosed();
+error InvalidMerkleRoot();
+error NullifierMismatch();
+
 contract AnonymousAirdropTest is Test {
     AnonymousAirdrop public airdrop;
     ERC20Mock public token;
@@ -84,7 +104,7 @@ contract AnonymousAirdropTest is Test {
     }
 
     function testCannotClaimBeforeStart() public {
-        vm.expectRevert("Claims not active");
+        vm.expectRevert(ClaimsNotActive.selector);
         airdrop.claim("", "", bytes32(0));
     }
 
@@ -98,10 +118,26 @@ contract AnonymousAirdropTest is Test {
     }
 
     function testCannotPauseClaimsAsNonOwner() public {
-        vm.expectRevert();
-        vm.prank(nonOwner);
-        airdrop.pauseClaims();
+    function testReentrancyBlocked() public {
+        vm.prank(owner);
+        airdrop.startClaims();
+
+        bytes32 nullifier = keccak256("reentrancy-test");
+        bytes20 claimant20 = bytes20(uint160(claimant));
+        GuestOutput memory output = GuestOutput({
+            merkleRoot: airdrop.merkleRoot(),
+            nullifier: nullifier,
+            claimantAddress: claimant20
+        });
+
+        bytes memory journal = abi.encode(output);
+        bytes memory seal = "";
+
+        vm.prank(claimant);
+        airdrop.claim(seal, journal, nullifier);
     }
+
+}
 
     function testEmergencyWithdraw() public {
         vm.prank(owner);
@@ -122,7 +158,7 @@ contract AnonymousAirdropTest is Test {
     function testCannotEmergencyWithdrawWhenActive() public {
         vm.prank(owner);
         airdrop.startClaims();
-        vm.expectRevert("Claims still active");
+        vm.expectRevert(ClaimsStillActive.selector);
         vm.prank(owner);
         airdrop.emergencyWithdraw(address(this));
     }
@@ -188,7 +224,7 @@ contract AnonymousAirdropTest is Test {
         vm.prank(claimant);
         airdrop.claim(seal, journal, nullifier);
 
-        vm.expectRevert("Already claimed");
+        vm.expectRevert(AlreadyClaimed.selector);
         vm.prank(claimant);
         airdrop.claim(seal, journal, nullifier);
     }
@@ -209,7 +245,7 @@ contract AnonymousAirdropTest is Test {
         bytes memory journal = abi.encode(output);
         bytes memory seal = "";
 
-        vm.expectRevert("Invalid merkle root");
+        vm.expectRevert(InvalidMerkleRoot.selector);
         vm.prank(claimant);
         airdrop.claim(seal, journal, nullifier);
     }
@@ -230,21 +266,12 @@ contract AnonymousAirdropTest is Test {
         bytes memory journal = abi.encode(output);
         bytes memory seal = "";
 
-        vm.expectRevert("Nullifier mismatch");
+        vm.expectRevert(NullifierMismatch.selector);
         vm.prank(claimant);
         airdrop.claim(seal, journal, nullifier);
     }
 
     function testCannotClaimWithInsufficientBalance() public {
-        vm.prank(owner);
-        airdrop.startClaims();
-
-        vm.prank(owner);
-        airdrop.pauseClaims();
-        
-        vm.prank(owner);
-        airdrop.emergencyWithdraw(owner);
-        
         vm.prank(owner);
         airdrop.startClaims();
 
@@ -260,9 +287,34 @@ contract AnonymousAirdropTest is Test {
         bytes memory journal = abi.encode(output);
         bytes memory seal = "";
 
-        vm.expectRevert("Insufficient airdrop balance");
         vm.prank(claimant);
         airdrop.claim(seal, journal, nullifier);
+
+        vm.prank(owner);
+        airdrop.pauseClaims();
+
+        vm.prank(owner);
+        airdrop.emergencyWithdraw(owner);
+
+        vm.expectRevert(AirdropAlreadyClosed.selector);
+        vm.prank(owner);
+        airdrop.startClaims();
+
+        bytes32 nullifier2 = keccak256("test-nullifier-2");
+        bytes20 claimant20_2 = bytes20(uint160(claimant));
+
+        GuestOutput memory output2 = GuestOutput({
+            merkleRoot: merkleRoot,
+            nullifier: nullifier2,
+            claimantAddress: claimant20_2
+        });
+
+        bytes memory journal2 = abi.encode(output2);
+        bytes memory seal2 = "";
+
+        vm.expectRevert(InsufficientBalance.selector);
+        vm.prank(claimant);
+        airdrop.claim(seal2, journal2, nullifier2);
     }
 
     function testGetRemainingTokens() public {
@@ -302,7 +354,7 @@ contract AnonymousAirdropTest is Test {
     }
 
     function testCannotDeployWithZeroVerifier() public {
-        vm.expectRevert("zero verifier address");
+        vm.expectRevert(ZeroVerifierAddress.selector);
         new AnonymousAirdrop(
             IRiscZeroVerifier(address(0)),
             imageId,
@@ -314,7 +366,7 @@ contract AnonymousAirdropTest is Test {
     }
 
     function testCannotDeployWithZeroImageId() public {
-        vm.expectRevert("zero image ID");
+        vm.expectRevert(ZeroImageId.selector);
         new AnonymousAirdrop(
             mockVerifier,
             bytes32(0),
@@ -326,7 +378,7 @@ contract AnonymousAirdropTest is Test {
     }
 
     function testCannotDeployWithZeroToken() public {
-        vm.expectRevert("zero token address");
+        vm.expectRevert(ZeroTokenAddress.selector);
         new AnonymousAirdrop(
             mockVerifier,
             imageId,
@@ -338,7 +390,7 @@ contract AnonymousAirdropTest is Test {
     }
 
     function testCannotDeployWithZeroMerkleRoot() public {
-        vm.expectRevert("zero merkle root");
+        vm.expectRevert(ZeroMerkleRoot.selector);
         new AnonymousAirdrop(
             mockVerifier,
             imageId,
@@ -350,7 +402,7 @@ contract AnonymousAirdropTest is Test {
     }
 
     function testCannotDeployWithZeroAmount() public {
-        vm.expectRevert("zero claim amount");
+        vm.expectRevert(ZeroClaimAmount.selector);
         new AnonymousAirdrop(
             mockVerifier,
             imageId,
@@ -363,7 +415,7 @@ contract AnonymousAirdropTest is Test {
 
     function testCannotEmergencyWithdrawToZeroAddress() public {
         vm.prank(owner);
-        vm.expectRevert("zero withdraw address");
+        vm.expectRevert(ZeroWithdrawAddress.selector);
         airdrop.emergencyWithdraw(address(0));
     }
 
@@ -383,7 +435,7 @@ contract AnonymousAirdropTest is Test {
         bytes memory journal = abi.encode(output);
         bytes memory seal = "";
 
-        vm.expectRevert("Not claimant");
+        vm.expectRevert(NotClaimant.selector);
         vm.prank(nonOwner);
         airdrop.claim(seal, journal, nullifier);
     }
@@ -403,7 +455,7 @@ contract AnonymousAirdropTest is Test {
         bytes memory journal = abi.encode(output);
         bytes memory seal = "";
 
-        vm.expectRevert("zero claimant address");
+        vm.expectRevert(ZeroClaimantAddress.selector);
         airdrop.claim(seal, journal, nullifier);
     }
 
@@ -413,7 +465,7 @@ contract AnonymousAirdropTest is Test {
 
         bytes32 nullifier = keccak256("test-nullifier");
 
-        vm.expectRevert("Invalid journal length");
+        vm.expectRevert(InvalidJournalLength.selector);
         airdrop.claim("", "short", nullifier);
     }
 
@@ -426,7 +478,35 @@ contract AnonymousAirdropTest is Test {
         vm.prank(owner);
         airdrop.emergencyWithdraw(owner);
 
-        vm.expectRevert("No tokens to withdraw");
+        vm.expectRevert(NoTokensToWithdraw.selector);
+        vm.prank(owner);
+        airdrop.emergencyWithdraw(address(this));
+    }
+
+    function testCannotStartClaimsAfterEmergencyWithdraw() public {
+        vm.prank(owner);
+        airdrop.startClaims();
+        vm.prank(owner);
+        airdrop.pauseClaims();
+
+        vm.prank(owner);
+        airdrop.emergencyWithdraw(address(this));
+
+        assertTrue(airdrop.closed());
+        vm.expectRevert(AirdropAlreadyClosed.selector);
+        vm.prank(owner);
+        airdrop.startClaims();
+    }
+
+    function testEmitsAirdropClosedEvent() public {
+        vm.prank(owner);
+        airdrop.startClaims();
+        vm.prank(owner);
+        airdrop.pauseClaims();
+
+        vm.expectEmit(true, false, false, true);
+        emit AnonymousAirdrop.AirdropClosed();
+
         vm.prank(owner);
         airdrop.emergencyWithdraw(address(this));
     }
@@ -512,7 +592,7 @@ contract AnonymousAirdropDeadlineTest is Test {
         bytes memory journal = abi.encode(output);
         bytes memory seal = "";
 
-        vm.expectRevert("Claim period ended");
+        vm.expectRevert(ClaimPeriodEnded.selector);
         vm.prank(claimant);
         airdrop.claim(seal, journal, nullifier);
     }
@@ -543,7 +623,7 @@ contract AnonymousAirdropDeadlineTest is Test {
 
     function testCannotDeployWithPastDeadline() public {
         vm.warp(1000);
-        vm.expectRevert("deadline must be future or zero");
+        vm.expectRevert(InvalidDeadline.selector);
         new AnonymousAirdrop(
             mockVerifier,
             imageId,
@@ -660,7 +740,10 @@ contract ReentrancyTest is Test {
         token.setAttackParams(airdrop, seal, journal, nullifier);
 
         vm.prank(claimant);
-        vm.expectRevert();
         airdrop.claim(seal, journal, nullifier);
+        assertTrue(airdrop.isClaimed(nullifier));
+        assertEq(airdrop.totalClaimants(), 1);
+        assertEq(airdrop.totalClaimed(), amountPerClaim);
     }
+}
 }

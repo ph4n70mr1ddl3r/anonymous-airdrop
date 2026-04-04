@@ -3,7 +3,7 @@ use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 use k256::SecretKey;
 use methods::{AIRDROP_ELF, AIRDROP_ID};
-use risc0_zkvm::{ExecutorEnv, Receipt, default_prover};
+use risc0_zkvm::{default_prover, ExecutorEnv, Receipt};
 use sha2::{Digest, Sha256};
 use std::{
     collections::{HashMap, HashSet},
@@ -321,6 +321,9 @@ pub fn generate_proof(
     }
 
     let airdrop_contract = parse_address(airdrop_contract_hex)?;
+    if airdrop_contract == Address::ZERO {
+        anyhow::bail!("Airdrop contract address cannot be zero");
+    }
 
     let mut claimant_bytes = [0u8; 20];
     claimant_bytes.copy_from_slice(claimant_address.as_slice());
