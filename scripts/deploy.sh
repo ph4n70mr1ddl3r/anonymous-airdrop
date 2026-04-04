@@ -111,7 +111,7 @@ echo ""
 
 echo "Step 5: Transferring tokens to airdrop contract..."
 
-ADDRESS_COUNT=$(grep -ciE '^0x[0-9a-fA-F]{40}' "$ELIGIBLE_CSV" || true)
+ADDRESS_COUNT=$(grep -ciE '^0x[0-9a-fA-F]{40}([, ]|$)' "$ELIGIBLE_CSV" || true)
 echo "Found $ADDRESS_COUNT eligible addresses in CSV"
 
 TOTAL_TOKENS=$(python3 -c "print($AMOUNT_PER_CLAIM * $ADDRESS_COUNT)" 2>/dev/null || \

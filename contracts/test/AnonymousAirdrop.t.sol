@@ -51,6 +51,26 @@ contract AnonymousAirdropTest is Test {
         assertEq(airdrop.claimDeadline(), 0);
     }
 
+    function testEmitsAirdropInitialized() public {
+        vm.expectEmit(true, true, false, true);
+        emit AnonymousAirdrop.AirdropInitialized(
+            address(mockVerifier),
+            imageId,
+            address(token),
+            merkleRoot,
+            amountPerClaim,
+            claimDeadline
+        );
+        new AnonymousAirdrop(
+            mockVerifier,
+            imageId,
+            IERC20(address(token)),
+            merkleRoot,
+            amountPerClaim,
+            claimDeadline
+        );
+    }
+
     function testStartClaims() public {
         vm.prank(owner);
         airdrop.startClaims();
@@ -127,7 +147,6 @@ contract AnonymousAirdropTest is Test {
         airdrop.startClaims();
 
         bytes32 nullifier = keccak256("test-nullifier");
-        bytes32 claimantAddr = bytes32(uint256(uint160(claimant)));
         bytes20 claimant20 = bytes20(uint160(claimant));
 
         GuestOutput memory output = GuestOutput({

@@ -6,7 +6,7 @@ use methods::{AIRDROP_ELF, AIRDROP_ID};
 use risc0_zkvm::{default_prover, ExecutorEnv, Receipt};
 use sha2::{Digest, Sha256};
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     fs::File,
     io::{BufRead, BufReader},
     path::PathBuf,
@@ -63,6 +63,7 @@ fn decode_journal_output(journal_bytes: &[u8]) -> Result<GuestOutput> {
     })
 }
 
+#[must_use]
 fn sha256_pair(left: &[u8; 32], right: &[u8; 32]) -> [u8; 32] {
     let mut hasher = Sha256::new();
     hasher.update(left);
@@ -70,14 +71,17 @@ fn sha256_pair(left: &[u8; 32], right: &[u8; 32]) -> [u8; 32] {
     hasher.finalize().into()
 }
 
+#[must_use]
 fn hash_leaf(address: &[u8; 20]) -> [u8; 32] {
     Sha256::new().chain_update(address).finalize().into()
 }
 
+#[must_use]
 fn hash_empty() -> [u8; 32] {
     Sha256::digest(&[] as &[u8]).into()
 }
 
+#[must_use]
 pub fn build_merkle_tree(leaves: &[[u8; 32]]) -> (Vec<Vec<[u8; 32]>>, [u8; 32]) {
     if leaves.is_empty() {
         let empty = hash_empty();
@@ -144,7 +148,7 @@ pub fn get_merkle_proof(tree: &[Vec<[u8; 32]>], index: u64) -> Result<MerkleProo
     let mut current_index = index;
 
     for depth in 0..MERKLE_TREE_DEPTH {
-        let sibling_index = if current_index % 2 == 0 {
+        let sibling_index = if current_index.is_multiple_of(2) {
             current_index + 1
         } else {
             current_index - 1
@@ -163,7 +167,7 @@ pub fn get_merkle_proof(tree: &[Vec<[u8; 32]>], index: u64) -> Result<MerkleProo
     Ok(MerkleProof { leaf, path, index })
 }
 
-pub fn parse_csv(csv_path: &PathBuf) -> Result<Vec<([u8; 20], u64)>> {
+pub fn parse_csv(csv_path: &PathBuf) -> Result<Vec<[u8; 20]>> {
     let file = File::open(csv_path).context("Failed to open CSV file")?;
     let reader = BufReader::new(file);
     let mut entries = Vec::new();
@@ -213,53 +217,52 @@ pub fn parse_csv(csv_path: &PathBuf) -> Result<Vec<([u8; 20], u64)>> {
 
         let mut address = [0u8; 20];
         address.copy_from_slice(&address_bytes);
-        entries.push((address, line_idx as u64));
+        entries.push(address);
     }
 
     Ok(entries)
 }
 
-pub fn build_tree_from_csv(
-    csv_path: &PathBuf,
-) -> Result<(Vec<Vec<[u8; 32]>>, [u8; 32], HashMap<[u8; 20], u64>)> {
+type MerkleTree = Vec<Vec<[u8; 32]>>;
+type AddressIndex = HashMap<[u8; 20], u64>;
+
+pub fn build_tree_from_csv(csv_path: &PathBuf) -> Result<(MerkleTree, [u8; 32], AddressIndex)> {
     println!("Parsing CSV file...");
     let entries = parse_csv(csv_path)?;
-    println!("Parsed {} eligible addresses", entries.len());
+    println!("Parsed {} address entries from CSV", entries.len());
 
-    let mut address_to_index: HashMap<[u8; 20], u64> = HashMap::new();
-    let mut leaves: Vec<[u8; 32]> = Vec::with_capacity(entries.len());
+    let mut seen: HashSet<[u8; 20]> = HashSet::with_capacity(entries.len());
     let mut duplicates = 0u64;
 
-    for (address, _line) in &entries {
-        if address_to_index.contains_key(address) {
+    for address in &entries {
+        if !seen.insert(*address) {
             duplicates += 1;
-            continue;
         }
-        let leaf = hash_leaf(address);
-        address_to_index.insert(*address, leaves.len() as u64);
-        leaves.push(leaf);
     }
 
     if duplicates > 0 {
         println!("Warning: {} duplicate addresses skipped", duplicates);
     }
-    println!("Built {} unique leaves for Merkle tree", leaves.len());
 
-    if entries.len() > 1_000_000 {
+    let mut addresses: Vec<[u8; 20]> = seen.into_iter().collect();
+    addresses.sort();
+    println!(
+        "Built {} unique leaves, sorted canonically",
+        addresses.len()
+    );
+
+    if addresses.len() > 1_000_000 {
         eprintln!(
             "Warning: Building tree with {} leaves. This may require significant memory (~2GB per 1M leaves).",
-            leaves.len()
+            addresses.len()
         );
     }
 
-    let mut addresses: Vec<[u8; 20]> = address_to_index.keys().copied().collect();
-    addresses.sort();
-    leaves = addresses.iter().map(|addr| hash_leaf(addr)).collect();
-    address_to_index.clear();
+    let leaves: Vec<[u8; 32]> = addresses.iter().map(hash_leaf).collect();
+    let mut address_to_index: HashMap<[u8; 20], u64> = HashMap::with_capacity(addresses.len());
     for (i, addr) in addresses.iter().enumerate() {
         address_to_index.insert(*addr, i as u64);
     }
-    println!("Leaves sorted canonically by address");
 
     let (tree, root) = build_merkle_tree(&leaves);
 
@@ -809,8 +812,8 @@ mod tests {
 
         let entries = parse_csv(&file.path().to_path_buf()).unwrap();
         assert_eq!(entries.len(), 2);
-        assert_eq!(entries[0].0, [0x11u8; 20]);
-        assert_eq!(entries[1].0, [0x22u8; 20]);
+        assert_eq!(entries[0], [0x11u8; 20]);
+        assert_eq!(entries[1], [0x22u8; 20]);
     }
 
     #[test]

@@ -37,6 +37,14 @@ contract AnonymousAirdrop is Ownable, ReentrancyGuard {
     event ClaimsStarted();
     event ClaimsPaused();
     event EmergencyWithdraw(address indexed to, uint256 amount);
+    event AirdropInitialized(
+        address indexed verifier,
+        bytes32 imageId,
+        address indexed token,
+        bytes32 merkleRoot,
+        uint256 amountPerClaim,
+        uint256 claimDeadline
+    );
 
     constructor(
         IRiscZeroVerifier _verifier,
@@ -59,6 +67,15 @@ contract AnonymousAirdrop is Ownable, ReentrancyGuard {
         amountPerClaim = _amountPerClaim;
         claimDeadline = _claimDeadline;
         claimsActive = false;
+
+        emit AirdropInitialized(
+            address(_verifier),
+            _imageId,
+            address(_token),
+            _merkleRoot,
+            _amountPerClaim,
+            _claimDeadline
+        );
     }
 
     /// @notice Claim tokens from the airdrop using a valid ZK proof
