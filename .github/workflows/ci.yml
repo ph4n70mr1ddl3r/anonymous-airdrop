@@ -54,8 +54,8 @@ jobs:
       - name: Install Foundry dependencies
         run: |
           cd contracts
-          forge install risc0/risc0-ethereum --no-commit || true
-          forge install OpenZeppelin/openzeppelin-contracts --no-commit || true
+          forge install risc0/risc0-ethereum --no-commit
+          forge install OpenZeppelin/openzeppelin-contracts --no-commit
 
       - name: Run Solidity tests
         run: |

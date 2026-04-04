@@ -27,8 +27,7 @@ import {
     NullifierMismatch,
     AirdropNotClosed,
     ZeroRescueAddress,
-    NoTokensToRescue,
-    CannotRescueAirdropToken
+    NoTokensToRescue
 } from "../src/AnonymousAirdrop.sol";
 import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
@@ -489,7 +488,7 @@ contract AnonymousAirdropTest is Test {
         vm.prank(owner);
         airdrop.emergencyWithdraw(address(this));
 
-        vm.expectRevert(CannotRescueAirdropToken.selector);
+        vm.expectRevert(NoTokensToRescue.selector);
         vm.prank(owner);
         airdrop.rescueTokens(owner, IERC20(address(token)));
     }

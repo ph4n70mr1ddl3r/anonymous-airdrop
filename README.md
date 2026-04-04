@@ -180,7 +180,8 @@ forge create contracts/src/AnonymousAirdrop.sol:AnonymousAirdrop \
         $IMAGE_ID \
         $TOKEN_ADDRESS \
         $MERKLE_ROOT \
-        $AMOUNT_PER_CLAIM
+        $AMOUNT_PER_CLAIM \
+        $CLAIM_DEADLINE
 ```
 
 ### 4. Transfer Tokens to Contract

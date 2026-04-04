@@ -146,7 +146,7 @@ pub fn get_merkle_proof(tree: &[Vec<[u8; 32]>], index: u64) -> Result<MerkleProo
     let mut current_index = index;
 
     for depth in 0..MERKLE_TREE_DEPTH {
-        let sibling_index = if current_index.is_multiple_of(2) {
+        let sibling_index = if current_index % 2 == 0 {
             current_index + 1
         } else {
             current_index - 1
@@ -248,6 +248,10 @@ pub fn build_tree_from_csv(csv_path: &Path) -> Result<(MerkleTree, [u8; 32], Add
         "Built {} unique leaves, sorted canonically",
         addresses.len()
     );
+
+    if addresses.is_empty() {
+        anyhow::bail!("No valid addresses found in CSV. Cannot build Merkle tree.");
+    }
 
     if addresses.len() > 1_000_000 {
         eprintln!(
@@ -565,7 +569,7 @@ fn main() -> Result<()> {
                 );
             };
 
-            let private_key = std::env::var("PRIVATE_KEY").context(
+            let mut private_key = std::env::var("PRIVATE_KEY").context(
                 "PRIVATE_KEY environment variable not set. Set it with: export PRIVATE_KEY=0x...",
             )?;
 
@@ -578,6 +582,8 @@ fn main() -> Result<()> {
                 merkle_root,
                 &address_to_index,
             )?;
+
+            private_key.zeroize();
 
             let output_file = output.unwrap_or(PathBuf::from("claim_proof.json"));
 

@@ -29,7 +29,6 @@ error NullifierMismatch();
 error AirdropNotClosed();
 error ZeroRescueAddress();
 error NoTokensToRescue();
-error CannotRescueAirdropToken();
 
 struct GuestOutput {
     bytes32 merkleRoot;
@@ -113,9 +112,6 @@ contract AnonymousAirdrop is Ownable, ReentrancyGuard {
         if (nullifiers[expectedNullifier]) revert AlreadyClaimed();
         if (claimDeadline != 0 && block.timestamp > claimDeadline) revert ClaimPeriodEnded();
         if (journal.length != 96) revert InvalidJournalLength();
-        if (token.balanceOf(address(this)) < amountPerClaim) revert InsufficientBalance();
-
-        verifier.verify(seal, imageId, sha256(journal));
 
         GuestOutput memory output = abi.decode(journal, (GuestOutput));
 
@@ -123,6 +119,9 @@ contract AnonymousAirdrop is Ownable, ReentrancyGuard {
         if (output.nullifier != expectedNullifier) revert NullifierMismatch();
         if (address(output.claimantAddress) == address(0)) revert ZeroClaimantAddress();
         if (msg.sender != address(output.claimantAddress)) revert NotClaimant();
+        if (token.balanceOf(address(this)) < amountPerClaim) revert InsufficientBalance();
+
+        verifier.verify(seal, imageId, sha256(journal));
 
         nullifiers[expectedNullifier] = true;
         totalClaimed += amountPerClaim;
@@ -167,7 +166,6 @@ contract AnonymousAirdrop is Ownable, ReentrancyGuard {
     function rescueTokens(address to, IERC20 tokenContract) external onlyOwner nonReentrant {
         if (!closed) revert AirdropNotClosed();
         if (to == address(0)) revert ZeroRescueAddress();
-        if (tokenContract == token) revert CannotRescueAirdropToken();
         uint256 balance = tokenContract.balanceOf(address(this));
         if (balance == 0) revert NoTokensToRescue();
         tokenContract.safeTransfer(to, balance);
