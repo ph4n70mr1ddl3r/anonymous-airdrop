@@ -5,6 +5,7 @@ import {IRiscZeroVerifier} from "@risc0/IRiscZeroVerifier.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
+import {Ownable2Step} from "@openzeppelin/contracts/access/Ownable2Step.sol";
 import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 
 error ZeroVerifierAddress();
@@ -29,6 +30,8 @@ error NullifierMismatch();
 error AirdropNotClosed();
 error ZeroRescueAddress();
 error NoTokensToRescue();
+error SealTooLarge();
+error EthDepositRejected();
 
 struct GuestOutput {
     bytes32 merkleRoot;
@@ -36,8 +39,10 @@ struct GuestOutput {
     bytes20 claimantAddress;
 }
 
-contract AnonymousAirdrop is Ownable, ReentrancyGuard {
+contract AnonymousAirdrop is Ownable2Step, ReentrancyGuard {
     using SafeERC20 for IERC20;
+
+    uint256 public constant MAX_SEAL_SIZE = 256 * 1024;
 
     IRiscZeroVerifier public immutable verifier;
     bytes32 public immutable imageId;
@@ -111,6 +116,7 @@ contract AnonymousAirdrop is Ownable, ReentrancyGuard {
         if (!claimsActive) revert ClaimsNotActive();
         if (nullifiers[expectedNullifier]) revert AlreadyClaimed();
         if (claimDeadline != 0 && block.timestamp > claimDeadline) revert ClaimPeriodEnded();
+        if (seal.length > MAX_SEAL_SIZE) revert SealTooLarge();
         if (journal.length != 96) revert InvalidJournalLength();
 
         GuestOutput memory output = abi.decode(journal, (GuestOutput));
@@ -183,5 +189,9 @@ contract AnonymousAirdrop is Ownable, ReentrancyGuard {
     /// @return True if the nullifier has been claimed
     function isClaimed(bytes32 nullifier) external view returns (bool) {
         return nullifiers[nullifier];
+    }
+
+    receive() external payable {
+        revert EthDepositRejected();
     }
 }

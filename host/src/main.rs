@@ -146,7 +146,7 @@ pub fn get_merkle_proof(tree: &[Vec<[u8; 32]>], index: u64) -> Result<MerkleProo
     let mut current_index = index;
 
     for depth in 0..MERKLE_TREE_DEPTH {
-        let sibling_index = if current_index % 2 == 0 {
+        let sibling_index = if current_index.is_multiple_of(2) {
             current_index + 1
         } else {
             current_index - 1
@@ -320,6 +320,10 @@ pub fn generate_proof(
     let claimant_address = parse_address(claimant_address_hex)?;
     if claimant_address == Address::ZERO {
         anyhow::bail!("Claimant address cannot be zero");
+    }
+
+    if chain_id == 0 {
+        anyhow::bail!("Chain ID must be non-zero");
     }
 
     let airdrop_contract = parse_address(airdrop_contract_hex)?;

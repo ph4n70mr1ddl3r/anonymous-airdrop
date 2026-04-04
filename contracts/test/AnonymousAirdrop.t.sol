@@ -27,7 +27,9 @@ import {
     NullifierMismatch,
     AirdropNotClosed,
     ZeroRescueAddress,
-    NoTokensToRescue
+    NoTokensToRescue,
+    SealTooLarge,
+    EthDepositRejected
 } from "../src/AnonymousAirdrop.sol";
 import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
@@ -367,6 +369,23 @@ contract AnonymousAirdropTest is Test {
 
         vm.expectRevert(InvalidJournalLength.selector);
         airdrop.claim("", "short", nullifier);
+    }
+
+    function testCannotClaimWithOversizedSeal() public {
+        vm.prank(owner);
+        airdrop.startClaims();
+
+        bytes32 nullifier = keccak256("test-nullifier");
+
+        bytes memory giantSeal = new bytes(256 * 1024 + 1);
+        vm.expectRevert(SealTooLarge.selector);
+        airdrop.claim(giantSeal, "", nullifier);
+    }
+
+    function testCannotSendEth() public {
+        vm.expectRevert(EthDepositRejected.selector);
+        (bool success,) = address(airdrop).call{value: 1 ether}("");
+        success;
     }
 
     function testCannotEmergencyWithdrawWithNoTokens() public {
@@ -746,8 +765,6 @@ contract AnonymousAirdropInvariantTest is Test {
     }
 
     function invariant_nullifierSetOnlyWhenClaimed() public view {
-        if (airdrop.totalClaimants() == 0) {
-            assertEq(airdrop.totalClaimed(), 0);
-        }
+        assertEq(airdrop.totalClaimants() > 0, airdrop.totalClaimed() > 0);
     }
 }
