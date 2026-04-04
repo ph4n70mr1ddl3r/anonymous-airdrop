@@ -8,7 +8,7 @@ use sha2::{Digest, Sha256};
 use std::{
     collections::HashMap,
     fs::File,
-    io::{BufRead, BufReader, Write},
+    io::{BufRead, BufReader},
     path::PathBuf,
 };
 use zeroize::Zeroize;
@@ -75,8 +75,7 @@ fn hash_leaf(address: &[u8; 20]) -> [u8; 32] {
 }
 
 fn hash_empty() -> [u8; 32] {
-    let empty = [0u8; 0];
-    Sha256::new().chain_update(&empty).finalize().into()
+    Sha256::digest(&[] as &[u8]).into()
 }
 
 pub fn build_merkle_tree(leaves: &[[u8; 32]]) -> (Vec<Vec<[u8; 32]>>, [u8; 32]) {
@@ -253,17 +252,11 @@ pub fn build_tree_from_csv(
         );
     }
 
-    let mut paired: Vec<([u8; 20], [u8; 32])> = address_to_index
-        .iter()
-        .map(|(&addr, _)| {
-            let leaf = hash_leaf(&addr);
-            (addr, leaf)
-        })
-        .collect();
-    paired.sort_by(|a, b| a.0.cmp(&b.0));
-    leaves = paired.iter().map(|(_, leaf)| *leaf).collect();
+    let mut addresses: Vec<[u8; 20]> = address_to_index.keys().copied().collect();
+    addresses.sort();
+    leaves = addresses.iter().map(|addr| hash_leaf(addr)).collect();
     address_to_index.clear();
-    for (i, (addr, _)) in paired.iter().enumerate() {
+    for (i, addr) in addresses.iter().enumerate() {
         address_to_index.insert(*addr, i as u64);
     }
     println!("Leaves sorted canonically by address");
@@ -320,6 +313,10 @@ pub fn generate_proof(
     let merkle_proof = get_merkle_proof(tree, *index)?;
 
     let claimant_address = parse_address(claimant_address_hex)?;
+    if claimant_address == Address::ZERO {
+        anyhow::bail!("Claimant address cannot be zero");
+    }
+
     let airdrop_contract = parse_address(airdrop_contract_hex)?;
 
     let mut claimant_bytes = [0u8; 20];
@@ -328,7 +325,7 @@ pub fn generate_proof(
     let mut contract_bytes = [0u8; 20];
     contract_bytes.copy_from_slice(airdrop_contract.as_slice());
 
-    let input = GuestInput {
+    let mut input = GuestInput {
         private_key_bytes: pk_bytes,
         merkle_root,
         merkle_proof,
@@ -341,6 +338,8 @@ pub fn generate_proof(
 
     println!("Generating zero-knowledge proof...");
     let env = ExecutorEnv::builder().write(&input)?.build()?;
+
+    input.private_key_bytes.zeroize();
 
     let prover = default_prover();
     let receipt = prover.prove(env, AIRDROP_ELF)?.receipt;
@@ -479,8 +478,10 @@ fn main() -> Result<()> {
                 "address_to_index": addr_map,
             });
 
-            let mut file = File::create(&output_file)?;
-            file.write_all(serde_json::to_string_pretty(&tree_data)?.as_bytes())?;
+            let json_data = serde_json::to_string_pretty(&tree_data)?;
+            let tmp_file = output_file.with_extension("tmp");
+            std::fs::write(&tmp_file, &json_data)?;
+            std::fs::rename(&tmp_file, &output_file)?;
 
             println!("\nMerkle tree info saved to {}", output_file.display());
             println!("Total eligible addresses: {}", address_to_index.len());
@@ -587,8 +588,10 @@ fn main() -> Result<()> {
                 "chain_id": chain_id,
             });
 
-            let mut file = File::create(&output_file)?;
-            file.write_all(serde_json::to_string_pretty(&proof_data)?.as_bytes())?;
+            let json_data = serde_json::to_string_pretty(&proof_data)?;
+            let tmp_file = output_file.with_extension("tmp");
+            std::fs::write(&tmp_file, &json_data)?;
+            std::fs::rename(&tmp_file, &output_file)?;
 
             println!("\nClaim proof saved to {}", output_file.display());
         }

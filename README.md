@@ -8,7 +8,7 @@ A privacy-preserving ERC20 token airdrop system built on Optimism using RISC Zer
 
 - **Eligible addresses** are committed to a Merkle tree (root published on-chain)
 - **Claimants** prove knowledge of the private key for an eligible address inside a RISC Zero zkVM
-- A **nullifier** is computed as `SHA256("airdrop-nullifier" || private_key || contract_address || chain_id)` to prevent double-claiming
+- A **nullifier** is computed as `SHA256("airdrop-nullifier-v2" || SHA256(private_key) || contract_address || chain_id)` to prevent double-claiming
 - The zkVM produces a **zero-knowledge proof** that verifies:
   1. The claimant knows the private key for an address in the Merkle tree
   2. The nullifier is correctly computed
@@ -267,7 +267,7 @@ cargo run --release -- verify-proof \
 
 The nullifier is computed as:
 ```
-nullifier = SHA256("airdrop-nullifier" || private_key || contract_address || chain_id)
+nullifier = SHA256("airdrop-nullifier-v2" || SHA256(private_key) || contract_address || chain_id)
 ```
 
 This ensures:

@@ -21,14 +21,14 @@ build-prod:
 test: test-rust test-solidity
 
 test-rust:
-	cargo test --release
+	RISC0_DEV_MODE=1 cargo test --release
 
 test-solidity:
-	cd contracts && forge test -vvv
+	forge test -vvv --root contracts
 
 lint:
 	cargo clippy --release -- -D warnings
-	cd contracts && forge fmt --check
+	forge fmt --check --root contracts
 
 clean:
 	cargo clean
