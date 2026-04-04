@@ -24,7 +24,11 @@ import {
     NoTokensToWithdraw,
     AirdropAlreadyClosed,
     InvalidMerkleRoot,
-    NullifierMismatch
+    NullifierMismatch,
+    AirdropNotClosed,
+    ZeroRescueAddress,
+    NoTokensToRescue,
+    CannotRescueAirdropToken
 } from "../src/AnonymousAirdrop.sol";
 import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
@@ -375,7 +379,23 @@ contract AnonymousAirdropTest is Test {
         vm.prank(owner);
         airdrop.emergencyWithdraw(owner);
 
-        vm.expectRevert(NoTokensToWithdraw.selector);
+        vm.expectRevert(AirdropAlreadyClosed.selector);
+        vm.prank(owner);
+        airdrop.emergencyWithdraw(address(this));
+    }
+
+    function testCannotEmergencyWithdrawTwice() public {
+        vm.prank(owner);
+        airdrop.startClaims();
+        vm.prank(owner);
+        airdrop.pauseClaims();
+
+        vm.prank(owner);
+        airdrop.emergencyWithdraw(address(this));
+
+        token.transfer(address(airdrop), 1000 * 10 ** 18);
+
+        vm.expectRevert(AirdropAlreadyClosed.selector);
         vm.prank(owner);
         airdrop.emergencyWithdraw(address(this));
     }
@@ -421,6 +441,72 @@ contract AnonymousAirdropTest is Test {
 
         vm.prank(owner);
         airdrop.emergencyWithdraw(address(this));
+    }
+
+    function testRescueTokens() public {
+        vm.prank(owner);
+        airdrop.startClaims();
+        vm.prank(owner);
+        airdrop.pauseClaims();
+        vm.prank(owner);
+        airdrop.emergencyWithdraw(address(this));
+
+        ERC20Mock otherToken = new ERC20Mock("Other", "OTH", owner, 10000 * 10 ** 18);
+        vm.prank(owner);
+        otherToken.transfer(address(airdrop), 500 * 10 ** 18);
+
+        vm.prank(owner);
+        airdrop.rescueTokens(owner, IERC20(address(otherToken)));
+
+        assertEq(otherToken.balanceOf(address(airdrop)), 0);
+        assertEq(otherToken.balanceOf(owner), 10000 * 10 ** 18);
+    }
+
+    function testCannotRescueTokensBeforeClose() public {
+        vm.expectRevert(AirdropNotClosed.selector);
+        vm.prank(owner);
+        airdrop.rescueTokens(owner, IERC20(address(token)));
+    }
+
+    function testCannotRescueTokensToZeroAddress() public {
+        vm.prank(owner);
+        airdrop.startClaims();
+        vm.prank(owner);
+        airdrop.pauseClaims();
+        vm.prank(owner);
+        airdrop.emergencyWithdraw(address(this));
+
+        vm.expectRevert(ZeroRescueAddress.selector);
+        vm.prank(owner);
+        airdrop.rescueTokens(address(0), IERC20(address(token)));
+    }
+
+    function testCannotRescueAirdropToken() public {
+        vm.prank(owner);
+        airdrop.startClaims();
+        vm.prank(owner);
+        airdrop.pauseClaims();
+        vm.prank(owner);
+        airdrop.emergencyWithdraw(address(this));
+
+        vm.expectRevert(CannotRescueAirdropToken.selector);
+        vm.prank(owner);
+        airdrop.rescueTokens(owner, IERC20(address(token)));
+    }
+
+    function testCannotRescueWithNoBalance() public {
+        vm.prank(owner);
+        airdrop.startClaims();
+        vm.prank(owner);
+        airdrop.pauseClaims();
+        vm.prank(owner);
+        airdrop.emergencyWithdraw(address(this));
+
+        ERC20Mock otherToken = new ERC20Mock("Other", "OTH", owner, 10000 * 10 ** 18);
+
+        vm.expectRevert(NoTokensToRescue.selector);
+        vm.prank(owner);
+        airdrop.rescueTokens(owner, IERC20(address(otherToken)));
     }
 }
 
@@ -649,12 +735,20 @@ contract AnonymousAirdropInvariantTest is Test {
     function invariant_totalClaimantsConsistentWithTotalClaimed() public view {
         if (airdrop.totalClaimants() == 0) {
             assertEq(airdrop.totalClaimed(), 0);
+        } else {
+            assertEq(airdrop.totalClaimed(), airdrop.totalClaimants() * airdrop.amountPerClaim());
         }
     }
 
     function invariant_closedImpliesNotActive() public view {
         if (airdrop.closed()) {
             assertFalse(airdrop.claimsActive());
+        }
+    }
+
+    function invariant_nullifierSetOnlyWhenClaimed() public view {
+        if (airdrop.totalClaimants() == 0) {
+            assertEq(airdrop.totalClaimed(), 0);
         }
     }
 }

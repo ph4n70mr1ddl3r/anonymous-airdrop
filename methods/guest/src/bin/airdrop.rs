@@ -92,15 +92,9 @@ fn verify_merkle_proof(proof: &MerkleProof, root: &[u8; 32]) -> bool {
 fn main() {
     let mut input: GuestInput = env::read();
 
-    assert!(
-        input.private_key_bytes != [0u8; 32],
-        "private key cannot be zero"
-    );
-    assert!(
-        input.airdrop_contract != [0u8; 20],
-        "airdrop contract cannot be zero"
-    );
-    assert!(input.chain_id > 0, "chain ID must be non-zero");
+    assert!(input.private_key_bytes != [0u8; 32], "zero pk");
+    assert!(input.airdrop_contract != [0u8; 20], "zero contract");
+    assert!(input.chain_id > 0, "zero chain");
 
     let secret_key = SecretKey::from_slice(&input.private_key_bytes).expect("invalid private key");
 
@@ -110,20 +104,14 @@ fn main() {
     let mut leaf = [0u8; 32];
     leaf.copy_from_slice(&leaf_hash);
 
-    assert!(
-        leaf == input.merkle_proof.leaf,
-        "derived leaf does not match proof leaf"
-    );
+    assert!(leaf == input.merkle_proof.leaf, "leaf mismatch");
 
     assert!(
         verify_merkle_proof(&input.merkle_proof, &input.merkle_root),
-        "Merkle proof verification failed"
+        "proof fail"
     );
 
-    assert!(
-        input.claimant_address != [0u8; 20],
-        "claimant address cannot be zero"
-    );
+    assert!(input.claimant_address != [0u8; 20], "zero claimant");
 
     let nullifier = compute_nullifier(
         &input.private_key_bytes,

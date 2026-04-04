@@ -26,6 +26,10 @@ error NoTokensToWithdraw();
 error AirdropAlreadyClosed();
 error InvalidMerkleRoot();
 error NullifierMismatch();
+error AirdropNotClosed();
+error ZeroRescueAddress();
+error NoTokensToRescue();
+error CannotRescueAirdropToken();
 
 struct GuestOutput {
     bytes32 merkleRoot;
@@ -55,6 +59,7 @@ contract AnonymousAirdrop is Ownable, ReentrancyGuard {
     event ClaimsPaused();
     event AirdropClosed();
     event EmergencyWithdraw(address indexed to, uint256 amount);
+    event TokensRescued(address indexed to, address indexed tokenContract, uint256 amount);
     event AirdropInitialized(
         address indexed verifier,
         bytes32 imageId,
@@ -145,6 +150,7 @@ contract AnonymousAirdrop is Ownable, ReentrancyGuard {
     /// @notice Withdraw remaining tokens after claims are permanently closed
     /// @param to Address to receive the remaining tokens
     function emergencyWithdraw(address to) external onlyOwner nonReentrant {
+        if (closed) revert AirdropAlreadyClosed();
         if (claimsActive) revert ClaimsStillActive();
         if (to == address(0)) revert ZeroWithdrawAddress();
         uint256 balance = token.balanceOf(address(this));
@@ -153,6 +159,19 @@ contract AnonymousAirdrop is Ownable, ReentrancyGuard {
         token.safeTransfer(to, balance);
         emit AirdropClosed();
         emit EmergencyWithdraw(to, balance);
+    }
+
+    /// @notice Rescue ERC20 tokens sent to this contract after airdrop is closed
+    /// @param to Address to receive the rescued tokens
+    /// @param tokenContract The ERC20 token contract to rescue
+    function rescueTokens(address to, IERC20 tokenContract) external onlyOwner nonReentrant {
+        if (!closed) revert AirdropNotClosed();
+        if (to == address(0)) revert ZeroRescueAddress();
+        if (tokenContract == token) revert CannotRescueAirdropToken();
+        uint256 balance = tokenContract.balanceOf(address(this));
+        if (balance == 0) revert NoTokensToRescue();
+        tokenContract.safeTransfer(to, balance);
+        emit TokensRescued(to, address(tokenContract), balance);
     }
 
     /// @notice Get the remaining token balance in the contract

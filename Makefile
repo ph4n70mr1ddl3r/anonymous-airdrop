@@ -25,6 +25,7 @@ test-rust:
 
 test-solidity:
 	forge test -vvv --root contracts
+	forge test --match-test invariant -vvv --root contracts
 
 lint:
 	cargo clippy --release -- -D warnings

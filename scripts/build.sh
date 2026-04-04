@@ -6,6 +6,13 @@ echo ""
 
 cd "$(dirname "$0")/.."
 
+for cmd in cargo forge; do
+    if ! command -v "$cmd" &>/dev/null; then
+        echo "Error: $cmd is not installed"
+        exit 1
+    fi
+done
+
 echo "Step 1: Building RISC Zero guest program..."
 echo "This will compile the zkVM guest and generate the ImageID"
 echo ""

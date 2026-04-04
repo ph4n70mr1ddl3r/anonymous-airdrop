@@ -91,14 +91,13 @@ pub fn build_merkle_tree(leaves: &[[u8; 32]]) -> (Vec<Vec<[u8; 32]>>, [u8; 32]) 
     let mut tree: Vec<Vec<[u8; 32]>> = Vec::with_capacity(MERKLE_TREE_DEPTH + 1);
     tree.push(leaves.to_vec());
 
-    let mut current_level = leaves.to_vec();
-
-    for _ in 0..MERKLE_TREE_DEPTH {
+    for level in 0..MERKLE_TREE_DEPTH {
+        let current_level = &tree[level];
         if current_level.len() == 1 {
             break;
         }
 
-        let mut next_level = Vec::new();
+        let mut next_level = Vec::with_capacity(current_level.len().div_ceil(2));
         let mut i = 0;
         while i < current_level.len() {
             let left = current_level[i];
@@ -111,7 +110,6 @@ pub fn build_merkle_tree(leaves: &[[u8; 32]]) -> (Vec<Vec<[u8; 32]>>, [u8; 32]) 
             i += 2;
         }
         tree.push(next_level);
-        current_level = tree.last().unwrap().clone();
     }
 
     while tree.len() <= MERKLE_TREE_DEPTH {
@@ -892,5 +890,15 @@ mod tests {
     #[test]
     fn test_parse_address_invalid_hex() {
         assert!(parse_address("0xGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGG").is_err());
+    }
+
+    #[test]
+    fn test_derive_address_from_known_key() {
+        let sk_hex = "4c0883a69102937d6231471b5dbb6204fe512961708279f8f8c4c7a0e9e2a3d6";
+        let sk_bytes = hex::decode(sk_hex).unwrap();
+        let secret_key = SecretKey::from_slice(&sk_bytes).unwrap();
+        let address = derive_address_from_secret_key(&secret_key);
+        assert_eq!(address.len(), 20);
+        assert_ne!(address, [0u8; 20]);
     }
 }
