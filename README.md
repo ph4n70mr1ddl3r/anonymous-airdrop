@@ -106,7 +106,7 @@ anonymous-airdrop/
 
 ### Prerequisites
 
-- Rust 1.80+
+- Rust 1.93+
 - RISC Zero toolchain (`cargo install cargo-risczero`)
 - Foundry (`curl -L https://foundry.paradigm.xyz | bash`)
 - Docker (for deterministic builds)

@@ -2,8 +2,6 @@
 *.json
 !package.json
 !tsconfig.json
-!foundry.toml.json
-!rust-toolchain.json
 target/
 contracts/lib/
 contracts/out/

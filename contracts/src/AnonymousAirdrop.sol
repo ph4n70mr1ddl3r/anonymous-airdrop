@@ -49,11 +49,7 @@ contract AnonymousAirdrop is Ownable, ReentrancyGuard {
     bool public claimsActive;
     bool public closed;
 
-    event Claimed(
-        bytes32 indexed nullifier,
-        address indexed claimantAddress,
-        uint256 amount
-    );
+    event Claimed(bytes32 indexed nullifier, address indexed claimantAddress, uint256 amount);
 
     event ClaimsStarted();
     event ClaimsPaused();
@@ -68,6 +64,13 @@ contract AnonymousAirdrop is Ownable, ReentrancyGuard {
         uint256 claimDeadline
     );
 
+    /// @notice Deploy the airdrop contract
+    /// @param _verifier RISC Zero verifier contract address
+    /// @param _imageId Expected guest program image ID
+    /// @param _token ERC20 token to distribute
+    /// @param _merkleRoot Root of the eligible addresses Merkle tree
+    /// @param _amountPerClaim Token amount per claim
+    /// @param _claimDeadline Unix timestamp deadline (0 = no deadline)
     constructor(
         IRiscZeroVerifier _verifier,
         bytes32 _imageId,
@@ -92,12 +95,7 @@ contract AnonymousAirdrop is Ownable, ReentrancyGuard {
         closed = false;
 
         emit AirdropInitialized(
-            address(_verifier),
-            _imageId,
-            address(_token),
-            _merkleRoot,
-            _amountPerClaim,
-            _claimDeadline
+            address(_verifier), _imageId, address(_token), _merkleRoot, _amountPerClaim, _claimDeadline
         );
     }
 
@@ -105,11 +103,7 @@ contract AnonymousAirdrop is Ownable, ReentrancyGuard {
     /// @param seal The RISC Zero proof seal
     /// @param journal The journal output from the zkVM execution
     /// @param expectedNullifier The expected nullifier to prevent double claims
-    function claim(
-        bytes calldata seal,
-        bytes calldata journal,
-        bytes32 expectedNullifier
-    ) external nonReentrant {
+    function claim(bytes calldata seal, bytes calldata journal, bytes32 expectedNullifier) external nonReentrant {
         if (!claimsActive) revert ClaimsNotActive();
         if (nullifiers[expectedNullifier]) revert AlreadyClaimed();
         if (claimDeadline != 0 && block.timestamp > claimDeadline) revert ClaimPeriodEnded();
@@ -129,13 +123,9 @@ contract AnonymousAirdrop is Ownable, ReentrancyGuard {
         totalClaimed += amountPerClaim;
         totalClaimants++;
 
-        token.safeTransfer(address(uint160(output.claimantAddress)), amountPerClaim);
+        token.safeTransfer(msg.sender, amountPerClaim);
 
-        emit Claimed(
-            expectedNullifier,
-            address(output.claimantAddress),
-            amountPerClaim
-        );
+        emit Claimed(expectedNullifier, address(output.claimantAddress), amountPerClaim);
     }
 
     /// @notice Start the claims phase, allowing users to claim tokens
@@ -147,6 +137,7 @@ contract AnonymousAirdrop is Ownable, ReentrancyGuard {
 
     /// @notice Pause claims temporarily
     function pauseClaims() external onlyOwner {
+        if (closed) revert AirdropAlreadyClosed();
         claimsActive = false;
         emit ClaimsPaused();
     }

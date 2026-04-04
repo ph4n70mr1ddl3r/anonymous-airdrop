@@ -3,7 +3,7 @@ use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 use k256::SecretKey;
 use methods::{AIRDROP_ELF, AIRDROP_ID};
-use risc0_zkvm::{default_prover, ExecutorEnv, Receipt};
+use risc0_zkvm::{ExecutorEnv, Receipt, default_prover};
 use sha2::{Digest, Sha256};
 use std::{
     collections::{HashMap, HashSet},
@@ -454,14 +454,15 @@ fn main() -> Result<()> {
 
             let output_file = output.unwrap_or(PathBuf::from("merkle_tree.json"));
 
-            let mut leaves_hex = Vec::with_capacity(address_to_index.len());
             let mut addr_entries: Vec<(&[u8; 20], &u64)> = address_to_index.iter().collect();
             addr_entries.sort_by_key(|(_, idx)| *idx);
 
-            for (addr, idx) in &addr_entries {
-                let leaf = hash_leaf(addr);
-                leaves_hex.push((format!("0x{}", hex::encode(leaf)), *idx));
-            }
+            let leaves_array: Vec<serde_json::Value> = addr_entries
+                .iter()
+                .map(|(addr, _)| {
+                    serde_json::Value::String(format!("0x{}", hex::encode(hash_leaf(addr))))
+                })
+                .collect();
 
             let mut addr_map = serde_json::Map::new();
             for (addr, idx) in &addr_entries {
@@ -470,11 +471,6 @@ fn main() -> Result<()> {
                     serde_json::Value::Number((**idx).into()),
                 );
             }
-
-            let leaves_array: Vec<serde_json::Value> = leaves_hex
-                .into_iter()
-                .map(|(h, _)| serde_json::Value::String(h))
-                .collect();
 
             let tree_data = serde_json::json!({
                 "merkle_root": format!("0x{}", hex::encode(root)),
