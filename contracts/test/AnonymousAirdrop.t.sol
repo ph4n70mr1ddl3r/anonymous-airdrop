@@ -87,6 +87,16 @@ contract AnonymousAirdropTest is Test {
         assertTrue(airdrop.claimsActive());
     }
 
+    function testStartClaimsIdempotent() public {
+        vm.prank(owner);
+        airdrop.startClaims();
+        assertTrue(airdrop.claimsActive());
+
+        vm.prank(owner);
+        airdrop.startClaims();
+        assertTrue(airdrop.claimsActive());
+    }
+
     function testCannotStartClaimsAsNonOwner() public {
         vm.expectRevert();
         vm.prank(nonOwner);
@@ -102,6 +112,19 @@ contract AnonymousAirdropTest is Test {
         vm.prank(owner);
         airdrop.startClaims();
         assertTrue(airdrop.claimsActive());
+        vm.prank(owner);
+        airdrop.pauseClaims();
+        assertFalse(airdrop.claimsActive());
+    }
+
+    function testPauseClaimsIdempotent() public {
+        vm.prank(owner);
+        airdrop.startClaims();
+
+        vm.prank(owner);
+        airdrop.pauseClaims();
+        assertFalse(airdrop.claimsActive());
+
         vm.prank(owner);
         airdrop.pauseClaims();
         assertFalse(airdrop.claimsActive());
@@ -388,7 +411,7 @@ contract AnonymousAirdropTest is Test {
         success;
     }
 
-    function testCannotEmergencyWithdrawWithNoTokens() public {
+    function testCannotEmergencyWithdrawAfterClose() public {
         vm.prank(owner);
         airdrop.startClaims();
         vm.prank(owner);
@@ -400,6 +423,16 @@ contract AnonymousAirdropTest is Test {
         vm.expectRevert(AirdropAlreadyClosed.selector);
         vm.prank(owner);
         airdrop.emergencyWithdraw(address(this));
+    }
+
+    function testCannotEmergencyWithdrawWithNoTokens() public {
+        vm.startPrank(owner);
+        AnonymousAirdrop unfundedAirdrop =
+            new AnonymousAirdrop(mockVerifier, imageId, IERC20(address(token)), merkleRoot, amountPerClaim, 0);
+
+        vm.expectRevert(NoTokensToWithdraw.selector);
+        unfundedAirdrop.emergencyWithdraw(owner);
+        vm.stopPrank();
     }
 
     function testCannotEmergencyWithdrawTwice() public {
@@ -764,7 +797,7 @@ contract AnonymousAirdropInvariantTest is Test {
         }
     }
 
-    function invariant_nullifierSetOnlyWhenClaimed() public view {
+    function invariant_claimantsAndClaimedConsistent() public view {
         assertEq(airdrop.totalClaimants() > 0, airdrop.totalClaimed() > 0);
     }
 }
