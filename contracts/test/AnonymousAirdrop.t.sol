@@ -638,6 +638,23 @@ contract AnonymousAirdropTest is Test {
         airdrop.rescueTokens(owner, IERC20(address(otherToken)));
     }
 
+    function testCannotRescueTokensToContractItself() public {
+        vm.prank(owner);
+        airdrop.startClaims();
+        vm.prank(owner);
+        airdrop.pauseClaims();
+        vm.prank(owner);
+        airdrop.emergencyWithdraw(address(this));
+
+        ERC20Mock otherToken = new ERC20Mock("Other", "OTH", owner, 10000 * 10 ** 18);
+        vm.prank(owner);
+        otherToken.transfer(address(airdrop), 500 * 10 ** 18);
+
+        vm.prank(owner);
+        vm.expectRevert(InvalidWithdrawAddress.selector);
+        airdrop.rescueTokens(address(airdrop), IERC20(address(otherToken)));
+    }
+
     function testOwnershipTransferTwoStep() public {
         address newOwner = address(0xABC);
 

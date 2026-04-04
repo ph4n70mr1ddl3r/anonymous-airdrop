@@ -169,13 +169,13 @@ contract AnonymousAirdrop is Ownable2Step, ReentrancyGuard {
         if (claimsActive) revert ClaimsStillActive();
         if (to == address(0)) revert ZeroWithdrawAddress();
         if (to == address(this)) revert InvalidWithdrawAddress();
-        uint256 balance = token.balanceOf(address(this));
-        if (balance == 0) revert NoTokensToWithdraw();
+        uint256 balanceBefore = token.balanceOf(address(this));
+        if (balanceBefore == 0) revert NoTokensToWithdraw();
         closed = true;
         claimsActive = false;
-        token.safeTransfer(to, balance);
+        token.safeTransfer(to, balanceBefore);
         emit AirdropClosed();
-        emit EmergencyWithdraw(to, balance);
+        emit EmergencyWithdraw(to, balanceBefore - token.balanceOf(address(this)));
     }
 
     /// @notice Rescue ERC20 tokens sent to this contract after airdrop is closed
@@ -185,10 +185,11 @@ contract AnonymousAirdrop is Ownable2Step, ReentrancyGuard {
     function rescueTokens(address to, IERC20 tokenContract) external onlyOwner nonReentrant {
         if (!closed) revert AirdropNotClosed();
         if (to == address(0)) revert ZeroRescueAddress();
-        uint256 balance = tokenContract.balanceOf(address(this));
-        if (balance == 0) revert NoTokensToRescue();
-        tokenContract.safeTransfer(to, balance);
-        emit TokensRescued(to, address(tokenContract), balance);
+        if (to == address(this)) revert InvalidWithdrawAddress();
+        uint256 balanceBefore = tokenContract.balanceOf(address(this));
+        if (balanceBefore == 0) revert NoTokensToRescue();
+        tokenContract.safeTransfer(to, balanceBefore);
+        emit TokensRescued(to, address(tokenContract), balanceBefore - tokenContract.balanceOf(address(this)));
     }
 
     /// @notice Get the remaining token balance in the contract
@@ -213,12 +214,12 @@ contract AnonymousAirdrop is Ownable2Step, ReentrancyGuard {
         address to = owner();
         if (to == address(0)) revert ZeroWithdrawAddress();
         if (to == address(this)) revert InvalidWithdrawAddress();
-        uint256 balance = token.balanceOf(address(this));
-        if (balance == 0) revert NoTokensToWithdraw();
+        uint256 balanceBefore = token.balanceOf(address(this));
+        if (balanceBefore == 0) revert NoTokensToWithdraw();
         closed = true;
-        token.safeTransfer(to, balance);
+        token.safeTransfer(to, balanceBefore);
         emit AirdropClosed();
-        emit EmergencyWithdraw(to, balance);
+        emit EmergencyWithdraw(to, balanceBefore - token.balanceOf(address(this)));
     }
 
     /// @notice Disabled - ownership renunciation is not allowed to maintain a responsible party
