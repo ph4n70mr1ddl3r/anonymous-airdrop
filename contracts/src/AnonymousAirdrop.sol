@@ -32,11 +32,17 @@ error ZeroRescueAddress();
 error NoTokensToRescue();
 error SealTooLarge();
 error EthDepositRejected();
+error WrongAirdropContract();
+error WrongChainId();
+error DeadlineNotPassed();
+error RenounceDisabled();
 
 struct GuestOutput {
     bytes32 merkleRoot;
     bytes32 nullifier;
     bytes20 claimantAddress;
+    bytes20 airdropContract;
+    uint256 chainId;
 }
 
 contract AnonymousAirdrop is Ownable2Step, ReentrancyGuard {
@@ -117,7 +123,7 @@ contract AnonymousAirdrop is Ownable2Step, ReentrancyGuard {
         if (nullifiers[expectedNullifier]) revert AlreadyClaimed();
         if (claimDeadline != 0 && block.timestamp > claimDeadline) revert ClaimPeriodEnded();
         if (seal.length > MAX_SEAL_SIZE) revert SealTooLarge();
-        if (journal.length != 96) revert InvalidJournalLength();
+        if (journal.length != 160) revert InvalidJournalLength();
 
         GuestOutput memory output = abi.decode(journal, (GuestOutput));
 
@@ -125,6 +131,8 @@ contract AnonymousAirdrop is Ownable2Step, ReentrancyGuard {
         if (output.nullifier != expectedNullifier) revert NullifierMismatch();
         if (address(output.claimantAddress) == address(0)) revert ZeroClaimantAddress();
         if (msg.sender != address(output.claimantAddress)) revert NotClaimant();
+        if (address(output.airdropContract) != address(this)) revert WrongAirdropContract();
+        if (output.chainId != block.chainid) revert WrongChainId();
         if (token.balanceOf(address(this)) < amountPerClaim) revert InsufficientBalance();
 
         verifier.verify(seal, imageId, sha256(journal));
@@ -189,6 +197,28 @@ contract AnonymousAirdrop is Ownable2Step, ReentrancyGuard {
     /// @return True if the nullifier has been claimed
     function isClaimed(bytes32 nullifier) external view returns (bool) {
         return nullifiers[nullifier];
+    }
+
+    function withdrawAfterDeadline() external nonReentrant {
+        if (closed) revert AirdropAlreadyClosed();
+        if (claimDeadline == 0 || block.timestamp <= claimDeadline) revert DeadlineNotPassed();
+        if (claimsActive) revert ClaimsStillActive();
+        address to = owner();
+        if (to == address(0)) revert ZeroWithdrawAddress();
+        uint256 balance = token.balanceOf(address(this));
+        if (balance == 0) revert NoTokensToWithdraw();
+        closed = true;
+        token.safeTransfer(to, balance);
+        emit AirdropClosed();
+        emit EmergencyWithdraw(to, balance);
+    }
+
+    function renounceOwnership() public view override onlyOwner {
+        revert RenounceDisabled();
+    }
+
+    fallback() external payable {
+        revert EthDepositRejected();
     }
 
     receive() external payable {

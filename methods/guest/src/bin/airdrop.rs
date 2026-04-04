@@ -27,6 +27,8 @@ pub struct GuestOutput {
     pub merkle_root: [u8; 32],
     pub nullifier: [u8; 32],
     pub claimant_address: [u8; 20],
+    pub airdrop_contract: [u8; 20],
+    pub chain_id: u64,
 }
 
 fn keccak256(data: &[u8]) -> [u8; 32] {
@@ -134,19 +136,27 @@ fn main() {
 
     input.private_key_bytes.fill(0);
 
-    // Journal format: 96 bytes total
-    //   [0..32]   merkle_root as bytes32
-    //   [32..64]  nullifier as bytes32
-    //   [64..84]  claimant_address as bytes20
-    //   [84..96]  zero padding (12 bytes)
+    // Journal format: 160 bytes total
+    //   [0..32]    merkle_root as bytes32
+    //   [32..64]   nullifier as bytes32
+    //   [64..84]   claimant_address as bytes20
+    //   [84..96]   zero padding (12 bytes)
+    //   [96..116]  airdrop_contract as bytes20
+    //   [116..128] zero padding (12 bytes)
+    //   [128..160] chain_id as uint256 (u64 big-endian right-aligned in 32 bytes)
     //
     // This raw byte layout MUST match Solidity's abi.encode(GuestOutput) where
-    // GuestOutput is (bytes32, bytes32, bytes20). Solidity ABI-encodes bytes20
-    // as a 32-byte word with the 20-byte value left-aligned and 12 zero bytes
-    // right-padded. Changing this format will break on-chain verification.
-    let mut journal = [0u8; 96];
+    // GuestOutput is (bytes32, bytes32, bytes20, bytes20, uint256). Solidity
+    // ABI-encodes bytes20 as a 32-byte word with the 20-byte value left-aligned
+    // and 12 zero bytes right-padded. uint256 is 32 bytes big-endian.
+    // Changing this format will break on-chain verification.
+    let mut journal = [0u8; 160];
     journal[0..32].copy_from_slice(&input.merkle_root);
     journal[32..64].copy_from_slice(&nullifier);
     journal[64..84].copy_from_slice(&input.claimant_address);
+    journal[96..116].copy_from_slice(&input.airdrop_contract);
+    let mut chain_id_bytes = [0u8; 32];
+    chain_id_bytes[24..32].copy_from_slice(&input.chain_id.to_be_bytes());
+    journal[128..160].copy_from_slice(&chain_id_bytes);
     env::commit_slice(&journal);
 }

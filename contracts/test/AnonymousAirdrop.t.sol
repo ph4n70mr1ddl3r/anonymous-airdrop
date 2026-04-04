@@ -29,7 +29,11 @@ import {
     ZeroRescueAddress,
     NoTokensToRescue,
     SealTooLarge,
-    EthDepositRejected
+    EthDepositRejected,
+    WrongAirdropContract,
+    WrongChainId,
+    DeadlineNotPassed,
+    RenounceDisabled
 } from "../src/AnonymousAirdrop.sol";
 import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
@@ -47,6 +51,16 @@ contract AnonymousAirdropTest is Test {
     address owner = address(0x1);
     address claimant = address(0x2);
     address nonOwner = address(0x3);
+
+    function makeGuestOutput(bytes32 nullifier_, bytes20 claimant20_) internal view returns (GuestOutput memory) {
+        return GuestOutput({
+            merkleRoot: merkleRoot,
+            nullifier: nullifier_,
+            claimantAddress: claimant20_,
+            airdropContract: bytes20(uint160(address(airdrop))),
+            chainId: block.chainid
+        });
+    }
 
     function setUp() public {
         vm.startPrank(owner);
@@ -184,10 +198,7 @@ contract AnonymousAirdropTest is Test {
         bytes32 nullifier = keccak256("test-nullifier");
         bytes20 claimant20 = bytes20(uint160(claimant));
 
-        GuestOutput memory output =
-            GuestOutput({merkleRoot: merkleRoot, nullifier: nullifier, claimantAddress: claimant20});
-
-        bytes memory journal = abi.encode(output);
+        bytes memory journal = abi.encode(makeGuestOutput(nullifier, claimant20));
         bytes memory seal = "";
 
         uint256 balanceBefore = token.balanceOf(claimant);
@@ -208,10 +219,7 @@ contract AnonymousAirdropTest is Test {
         bytes32 nullifier = keccak256("test-nullifier");
         bytes20 claimant20 = bytes20(uint160(claimant));
 
-        GuestOutput memory output =
-            GuestOutput({merkleRoot: merkleRoot, nullifier: nullifier, claimantAddress: claimant20});
-
-        bytes memory journal = abi.encode(output);
+        bytes memory journal = abi.encode(makeGuestOutput(nullifier, claimant20));
         bytes memory seal = "";
 
         vm.prank(claimant);
@@ -229,8 +237,13 @@ contract AnonymousAirdropTest is Test {
         bytes32 nullifier = keccak256("test-nullifier");
         bytes20 claimant20 = bytes20(uint160(claimant));
 
-        GuestOutput memory output =
-            GuestOutput({merkleRoot: bytes32(uint256(0xDEADBEEF)), nullifier: nullifier, claimantAddress: claimant20});
+        GuestOutput memory output = GuestOutput({
+            merkleRoot: bytes32(uint256(0xDEADBEEF)),
+            nullifier: nullifier,
+            claimantAddress: claimant20,
+            airdropContract: bytes20(uint160(address(airdrop))),
+            chainId: block.chainid
+        });
 
         bytes memory journal = abi.encode(output);
         bytes memory seal = "";
@@ -248,7 +261,11 @@ contract AnonymousAirdropTest is Test {
         bytes20 claimant20 = bytes20(uint160(claimant));
 
         GuestOutput memory output = GuestOutput({
-            merkleRoot: merkleRoot, nullifier: keccak256("different-nullifier"), claimantAddress: claimant20
+            merkleRoot: merkleRoot,
+            nullifier: keccak256("different-nullifier"),
+            claimantAddress: claimant20,
+            airdropContract: bytes20(uint160(address(airdrop))),
+            chainId: block.chainid
         });
 
         bytes memory journal = abi.encode(output);
@@ -271,8 +288,13 @@ contract AnonymousAirdropTest is Test {
         bytes32 nullifier = keccak256("test-nullifier");
         bytes20 claimant20 = bytes20(uint160(claimant));
 
-        GuestOutput memory output =
-            GuestOutput({merkleRoot: merkleRoot, nullifier: nullifier, claimantAddress: claimant20});
+        GuestOutput memory output = GuestOutput({
+            merkleRoot: merkleRoot,
+            nullifier: nullifier,
+            claimantAddress: claimant20,
+            airdropContract: bytes20(uint160(address(lowBalanceAirdrop))),
+            chainId: block.chainid
+        });
 
         bytes memory journal = abi.encode(output);
         bytes memory seal = "";
@@ -299,10 +321,7 @@ contract AnonymousAirdropTest is Test {
             address user = address(uint160(uint256(keccak256(abi.encodePacked("addr", i)))));
             bytes20 user20 = bytes20(uint160(user));
 
-            GuestOutput memory output =
-                GuestOutput({merkleRoot: merkleRoot, nullifier: nullifier, claimantAddress: user20});
-
-            bytes memory journal = abi.encode(output);
+            bytes memory journal = abi.encode(makeGuestOutput(nullifier, user20));
             bytes memory seal = "";
 
             vm.prank(user);
@@ -357,10 +376,7 @@ contract AnonymousAirdropTest is Test {
         bytes32 nullifier = keccak256("test-nullifier");
         bytes20 claimant20 = bytes20(uint160(claimant));
 
-        GuestOutput memory output =
-            GuestOutput({merkleRoot: merkleRoot, nullifier: nullifier, claimantAddress: claimant20});
-
-        bytes memory journal = abi.encode(output);
+        bytes memory journal = abi.encode(makeGuestOutput(nullifier, claimant20));
         bytes memory seal = "";
 
         vm.expectRevert(NotClaimant.selector);
@@ -374,8 +390,13 @@ contract AnonymousAirdropTest is Test {
 
         bytes32 nullifier = keccak256("test-nullifier");
 
-        GuestOutput memory output =
-            GuestOutput({merkleRoot: merkleRoot, nullifier: nullifier, claimantAddress: bytes20(address(0))});
+        GuestOutput memory output = GuestOutput({
+            merkleRoot: merkleRoot,
+            nullifier: nullifier,
+            claimantAddress: bytes20(address(0)),
+            airdropContract: bytes20(uint160(address(airdrop))),
+            chainId: block.chainid
+        });
 
         bytes memory journal = abi.encode(output);
         bytes memory seal = "";
@@ -394,6 +415,58 @@ contract AnonymousAirdropTest is Test {
         airdrop.claim("", "short", nullifier);
     }
 
+    function testCannotClaimWithWrongContract() public {
+        vm.prank(owner);
+        airdrop.startClaims();
+
+        bytes32 nullifier = keccak256("test-nullifier");
+        bytes20 claimant20 = bytes20(uint160(claimant));
+
+        GuestOutput memory output = GuestOutput({
+            merkleRoot: merkleRoot,
+            nullifier: nullifier,
+            claimantAddress: claimant20,
+            airdropContract: bytes20(uint160(address(0x9999))),
+            chainId: block.chainid
+        });
+
+        bytes memory journal = abi.encode(output);
+        bytes memory seal = "";
+
+        vm.expectRevert(WrongAirdropContract.selector);
+        vm.prank(claimant);
+        airdrop.claim(seal, journal, nullifier);
+    }
+
+    function testCannotClaimWithWrongChainId() public {
+        vm.prank(owner);
+        airdrop.startClaims();
+
+        bytes32 nullifier = keccak256("test-nullifier");
+        bytes20 claimant20 = bytes20(uint160(claimant));
+
+        GuestOutput memory output = GuestOutput({
+            merkleRoot: merkleRoot,
+            nullifier: nullifier,
+            claimantAddress: claimant20,
+            airdropContract: bytes20(uint160(address(airdrop))),
+            chainId: block.chainid + 1
+        });
+
+        bytes memory journal = abi.encode(output);
+        bytes memory seal = "";
+
+        vm.expectRevert(WrongChainId.selector);
+        vm.prank(claimant);
+        airdrop.claim(seal, journal, nullifier);
+    }
+
+    function testCannotRenounceOwnership() public {
+        vm.prank(owner);
+        vm.expectRevert(RenounceDisabled.selector);
+        airdrop.renounceOwnership();
+    }
+
     function testCannotClaimWithOversizedSeal() public {
         vm.prank(owner);
         airdrop.startClaims();
@@ -408,6 +481,12 @@ contract AnonymousAirdropTest is Test {
     function testCannotSendEth() public {
         vm.expectRevert(EthDepositRejected.selector);
         (bool success,) = address(airdrop).call{value: 1 ether}("");
+        success;
+    }
+
+    function testFallbackReverts() public {
+        vm.expectRevert(EthDepositRejected.selector);
+        (bool success,) = address(airdrop).call{value: 0}("nonExistentFunction()");
         success;
     }
 
@@ -573,6 +652,7 @@ contract AnonymousAirdropDeadlineTest is Test {
 
     address owner = address(0x1);
     address claimant = address(0x2);
+    address nonOwner = address(0x3);
 
     function setUp() public {
         claimDeadline = block.timestamp + 30 days;
@@ -603,8 +683,13 @@ contract AnonymousAirdropDeadlineTest is Test {
         bytes32 nullifier = keccak256("test-nullifier");
         bytes20 claimant20 = bytes20(uint160(claimant));
 
-        GuestOutput memory output =
-            GuestOutput({merkleRoot: merkleRoot, nullifier: nullifier, claimantAddress: claimant20});
+        GuestOutput memory output = GuestOutput({
+            merkleRoot: merkleRoot,
+            nullifier: nullifier,
+            claimantAddress: claimant20,
+            airdropContract: bytes20(uint160(address(airdrop))),
+            chainId: block.chainid
+        });
 
         bytes memory journal = abi.encode(output);
         bytes memory seal = "";
@@ -624,8 +709,13 @@ contract AnonymousAirdropDeadlineTest is Test {
         bytes32 nullifier = keccak256("test-nullifier");
         bytes20 claimant20 = bytes20(uint160(claimant));
 
-        GuestOutput memory output =
-            GuestOutput({merkleRoot: merkleRoot, nullifier: nullifier, claimantAddress: claimant20});
+        GuestOutput memory output = GuestOutput({
+            merkleRoot: merkleRoot,
+            nullifier: nullifier,
+            claimantAddress: claimant20,
+            airdropContract: bytes20(uint160(address(airdrop))),
+            chainId: block.chainid
+        });
 
         bytes memory journal = abi.encode(output);
         bytes memory seal = "";
@@ -644,8 +734,13 @@ contract AnonymousAirdropDeadlineTest is Test {
         bytes32 nullifier = keccak256("test-nullifier");
         bytes20 claimant20 = bytes20(uint160(claimant));
 
-        GuestOutput memory output =
-            GuestOutput({merkleRoot: merkleRoot, nullifier: nullifier, claimantAddress: claimant20});
+        GuestOutput memory output = GuestOutput({
+            merkleRoot: merkleRoot,
+            nullifier: nullifier,
+            claimantAddress: claimant20,
+            airdropContract: bytes20(uint160(address(airdrop))),
+            chainId: block.chainid
+        });
 
         bytes memory journal = abi.encode(output);
         bytes memory seal = "";
@@ -666,6 +761,69 @@ contract AnonymousAirdropDeadlineTest is Test {
 
     function testCanDeployWithZeroDeadline() public {
         new AnonymousAirdrop(mockVerifier, imageId, IERC20(address(token)), merkleRoot, amountPerClaim, 0);
+    }
+
+    function testWithdrawAfterDeadline() public {
+        vm.prank(owner);
+        airdrop.startClaims();
+        vm.prank(owner);
+        airdrop.pauseClaims();
+
+        vm.warp(claimDeadline + 1);
+
+        uint256 ownerBalanceBefore = token.balanceOf(owner);
+        uint256 contractBalance = token.balanceOf(address(airdrop));
+
+        vm.prank(nonOwner);
+        airdrop.withdrawAfterDeadline();
+
+        assertTrue(airdrop.closed());
+        assertEq(token.balanceOf(address(airdrop)), 0);
+        assertEq(token.balanceOf(owner), ownerBalanceBefore + contractBalance);
+    }
+
+    function testCannotWithdrawAfterDeadlineBeforeDeadline() public {
+        vm.prank(owner);
+        airdrop.pauseClaims();
+
+        vm.expectRevert(DeadlineNotPassed.selector);
+        vm.prank(nonOwner);
+        airdrop.withdrawAfterDeadline();
+    }
+
+    function testCannotWithdrawAfterDeadlineWhenActive() public {
+        vm.prank(owner);
+        airdrop.startClaims();
+
+        vm.warp(claimDeadline + 1);
+
+        vm.expectRevert(ClaimsStillActive.selector);
+        vm.prank(nonOwner);
+        airdrop.withdrawAfterDeadline();
+    }
+
+    function testCannotWithdrawAfterDeadlineNoDeadline() public {
+        AnonymousAirdrop noDeadlineAirdrop =
+            new AnonymousAirdrop(mockVerifier, imageId, IERC20(address(token)), merkleRoot, amountPerClaim, 0);
+
+        vm.expectRevert(DeadlineNotPassed.selector);
+        noDeadlineAirdrop.withdrawAfterDeadline();
+    }
+
+    function testCannotWithdrawAfterDeadlineWhenClosed() public {
+        vm.prank(owner);
+        airdrop.startClaims();
+        vm.prank(owner);
+        airdrop.pauseClaims();
+
+        vm.prank(owner);
+        airdrop.emergencyWithdraw(owner);
+
+        vm.warp(claimDeadline + 1);
+
+        vm.expectRevert(AirdropAlreadyClosed.selector);
+        vm.prank(nonOwner);
+        airdrop.withdrawAfterDeadline();
     }
 }
 
@@ -742,8 +900,13 @@ contract ReentrancyTest is Test {
         bytes32 nullifier = keccak256("reentrancy-test");
         bytes20 claimant20 = bytes20(uint160(claimant));
 
-        GuestOutput memory output =
-            GuestOutput({merkleRoot: airdrop.merkleRoot(), nullifier: nullifier, claimantAddress: claimant20});
+        GuestOutput memory output = GuestOutput({
+            merkleRoot: airdrop.merkleRoot(),
+            nullifier: nullifier,
+            claimantAddress: claimant20,
+            airdropContract: bytes20(uint160(address(airdrop))),
+            chainId: block.chainid
+        });
 
         bytes memory journal = abi.encode(output);
         bytes memory seal = "";
@@ -758,12 +921,63 @@ contract ReentrancyTest is Test {
     }
 }
 
+contract AirdropHandler is Test {
+    AnonymousAirdrop public airdrop;
+    ERC20Mock public token;
+    address public owner;
+
+    uint256 public ghost_totalClaimed;
+    uint256 public ghost_totalClaimants;
+
+    constructor(AnonymousAirdrop _airdrop, ERC20Mock _token, address _owner) {
+        airdrop = _airdrop;
+        token = _token;
+        owner = _owner;
+    }
+
+    function claim(bytes32 nullifier, address claimant_) external {
+        if (!airdrop.claimsActive()) return;
+        if (airdrop.claimDeadline() != 0 && block.timestamp > airdrop.claimDeadline()) return;
+        if (airdrop.isClaimed(nullifier)) return;
+        if (claimant_ == address(0)) return;
+
+        bytes20 claimant20 = bytes20(uint160(claimant_));
+        GuestOutput memory output = GuestOutput({
+            merkleRoot: airdrop.merkleRoot(),
+            nullifier: nullifier,
+            claimantAddress: claimant20,
+            airdropContract: bytes20(uint160(address(airdrop))),
+            chainId: block.chainid
+        });
+
+        bytes memory journal = abi.encode(output);
+
+        vm.prank(claimant_);
+        try airdrop.claim("", journal, nullifier) {
+            ghost_totalClaimed += airdrop.amountPerClaim();
+            ghost_totalClaimants++;
+        } catch {}
+    }
+
+    function startClaims() external {
+        if (airdrop.closed()) return;
+        vm.prank(owner);
+        try airdrop.startClaims() {} catch {}
+    }
+
+    function pauseClaims() external {
+        if (airdrop.closed()) return;
+        vm.prank(owner);
+        try airdrop.pauseClaims() {} catch {}
+    }
+}
+
 contract AnonymousAirdropInvariantTest is Test {
     AnonymousAirdrop public airdrop;
     ERC20Mock public token;
+    AirdropHandler public handler;
 
     address owner = address(0x1);
-    address claimant = address(0x2);
 
     function setUp() public {
         vm.startPrank(owner);
@@ -777,6 +991,14 @@ contract AnonymousAirdropInvariantTest is Test {
 
         token.transfer(address(airdrop), 100_000 * 10 ** 18);
         vm.stopPrank();
+
+        handler = new AirdropHandler(airdrop, token, owner);
+
+        bytes4[] memory selectors = new bytes4[](3);
+        selectors[0] = handler.claim.selector;
+        selectors[1] = handler.startClaims.selector;
+        selectors[2] = handler.pauseClaims.selector;
+        targetSelector(FuzzSelector({addr: address(handler), selectors: selectors}));
     }
 
     function invariant_totalClaimedNeverExceedsDeposits() public view {

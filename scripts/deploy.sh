@@ -9,7 +9,7 @@ if [ -z "${PRIVATE_KEY:-}" ]; then
     exit 1
 fi
 
-RPC_URL="${RPC_URL:-https://mainnet.optimism.io}"
+RPC_URL="${RPC_URL:?Error: RPC_URL must be explicitly set (e.g. https://mainnet.optimism.io)}"
 CHAIN="${CHAIN:-optimism}"
 
 echo "Network: $CHAIN"

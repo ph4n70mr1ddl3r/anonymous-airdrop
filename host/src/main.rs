@@ -3,7 +3,7 @@ use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 use k256::SecretKey;
 use methods::{AIRDROP_ELF, AIRDROP_ID};
-use risc0_zkvm::{ExecutorEnv, Receipt, default_prover};
+use risc0_zkvm::{default_prover, ExecutorEnv, Receipt};
 use sha2::{Digest, Sha256};
 use std::{
     collections::{HashMap, HashSet},
@@ -37,6 +37,8 @@ pub struct GuestOutput {
     pub merkle_root: [u8; 32],
     pub nullifier: [u8; 32],
     pub claimant_address: [u8; 20],
+    pub airdrop_contract: [u8; 20],
+    pub chain_id: u64,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -48,18 +50,27 @@ pub struct ClaimProof {
 
 fn decode_journal_output(journal_bytes: &[u8]) -> Result<GuestOutput> {
     anyhow::ensure!(
-        journal_bytes.len() == 96,
-        "Invalid journal: expected 96 bytes, got {}",
+        journal_bytes.len() == 160,
+        "Invalid journal: expected 160 bytes, got {}",
         journal_bytes.len()
     );
     anyhow::ensure!(
         journal_bytes[84..96].iter().all(|&b| b == 0),
-        "Invalid journal: non-zero padding bytes"
+        "Invalid journal: non-zero padding bytes at claimant_address"
     );
+    anyhow::ensure!(
+        journal_bytes[116..128].iter().all(|&b| b == 0),
+        "Invalid journal: non-zero padding bytes at airdrop_contract"
+    );
+    let mut chain_id_bytes = [0u8; 32];
+    chain_id_bytes.copy_from_slice(&journal_bytes[128..160]);
+    let chain_id = u64::from_be_bytes(chain_id_bytes[24..32].try_into()?);
     Ok(GuestOutput {
         merkle_root: journal_bytes[0..32].try_into()?,
         nullifier: journal_bytes[32..64].try_into()?,
         claimant_address: journal_bytes[64..84].try_into()?,
+        airdrop_contract: journal_bytes[96..116].try_into()?,
+        chain_id,
     })
 }
 
@@ -787,14 +798,20 @@ mod tests {
 
     #[test]
     fn test_decode_journal_output_valid() {
-        let mut journal = [0u8; 96];
+        let mut journal = [0u8; 160];
         journal[0..32].copy_from_slice(&[1u8; 32]);
         journal[32..64].copy_from_slice(&[2u8; 32]);
         journal[64..84].copy_from_slice(&[3u8; 20]);
+        journal[96..116].copy_from_slice(&[4u8; 20]);
+        let mut chain_id_bytes = [0u8; 32];
+        chain_id_bytes[24..32].copy_from_slice(&42u64.to_be_bytes());
+        journal[128..160].copy_from_slice(&chain_id_bytes);
         let output = decode_journal_output(&journal).unwrap();
         assert_eq!(output.merkle_root, [1u8; 32]);
         assert_eq!(output.nullifier, [2u8; 32]);
         assert_eq!(output.claimant_address, [3u8; 20]);
+        assert_eq!(output.airdrop_contract, [4u8; 20]);
+        assert_eq!(output.chain_id, 42);
     }
 
     #[test]
@@ -805,8 +822,15 @@ mod tests {
 
     #[test]
     fn test_decode_journal_output_nonzero_padding() {
-        let mut journal = [0u8; 96];
+        let mut journal = [0u8; 160];
         journal[90] = 1;
+        assert!(decode_journal_output(&journal).is_err());
+    }
+
+    #[test]
+    fn test_decode_journal_output_nonzero_padding_contract() {
+        let mut journal = [0u8; 160];
+        journal[120] = 1;
         assert!(decode_journal_output(&journal).is_err());
     }
 
