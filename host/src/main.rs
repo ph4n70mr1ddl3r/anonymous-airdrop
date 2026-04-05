@@ -62,6 +62,10 @@ fn decode_journal_output(journal_bytes: &[u8]) -> Result<GuestOutput> {
         journal_bytes[116..128].iter().all(|&b| b == 0),
         "Invalid journal: non-zero padding bytes at airdrop_contract"
     );
+    anyhow::ensure!(
+        journal_bytes[128..152].iter().all(|&b| b == 0),
+        "Invalid journal: non-zero bytes in chain_id upper portion"
+    );
     let mut chain_id_bytes = [0u8; 32];
     chain_id_bytes.copy_from_slice(&journal_bytes[128..160]);
     let chain_id = u64::from_be_bytes(chain_id_bytes[24..32].try_into()?);
@@ -845,6 +849,20 @@ mod tests {
     fn test_decode_journal_output_nonzero_padding_contract() {
         let mut journal = [0u8; 160];
         journal[120] = 1;
+        assert!(decode_journal_output(&journal).is_err());
+    }
+
+    #[test]
+    fn test_decode_journal_output_nonzero_chain_id_padding() {
+        let mut journal = [0u8; 160];
+        journal[0..32].copy_from_slice(&[1u8; 32]);
+        journal[32..64].copy_from_slice(&[2u8; 32]);
+        journal[64..84].copy_from_slice(&[3u8; 20]);
+        journal[96..116].copy_from_slice(&[4u8; 20]);
+        let mut chain_id_bytes = [0u8; 32];
+        chain_id_bytes[24..32].copy_from_slice(&42u64.to_be_bytes());
+        journal[128..160].copy_from_slice(&chain_id_bytes);
+        journal[130] = 1;
         assert!(decode_journal_output(&journal).is_err());
     }
 

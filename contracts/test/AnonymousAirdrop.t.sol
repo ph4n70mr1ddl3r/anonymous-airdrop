@@ -213,6 +213,68 @@ contract AnonymousAirdropTest is Test {
         assertEq(airdrop.totalClaimed(), amountPerClaim);
     }
 
+    function testEmitsClaimedEvent() public {
+        vm.prank(owner);
+        airdrop.startClaims();
+
+        bytes32 nullifier = keccak256("test-nullifier");
+        bytes20 claimant20 = bytes20(uint160(claimant));
+
+        bytes memory journal = abi.encode(makeGuestOutput(nullifier, claimant20));
+
+        vm.expectEmit(true, true, false, true);
+        emit AnonymousAirdrop.Claimed(nullifier, claimant, amountPerClaim);
+
+        vm.prank(claimant);
+        airdrop.claim("", journal, nullifier);
+    }
+
+    function testClaimWithFeeOnTransferToken() public {
+        FeeOnTransferERC20 feeToken = new FeeOnTransferERC20("FeeToken", "FEE", owner, 1_000_000 * 10 ** 18);
+
+        vm.startPrank(owner);
+        AnonymousAirdrop feeAirdrop =
+            new AnonymousAirdrop(mockVerifier, imageId, IERC20(address(feeToken)), merkleRoot, amountPerClaim, 0);
+
+        uint256 depositAmount = 100_000 * 10 ** 18;
+        uint256 depositFee = depositAmount * FeeOnTransferERC20(address(feeToken)).FEE_BPS() / 10000;
+        uint256 actualDeposit = depositAmount - depositFee;
+
+        feeToken.transfer(address(feeAirdrop), depositAmount);
+        feeAirdrop.startClaims();
+        vm.stopPrank();
+
+        assertEq(feeToken.balanceOf(address(feeAirdrop)), actualDeposit);
+
+        bytes32 nullifier = keccak256("fee-test");
+        bytes20 claimant20 = bytes20(uint160(claimant));
+
+        GuestOutput memory output = GuestOutput({
+            merkleRoot: merkleRoot,
+            nullifier: nullifier,
+            claimantAddress: claimant20,
+            airdropContract: bytes20(uint160(address(feeAirdrop))),
+            chainId: block.chainid
+        });
+
+        bytes memory journal = abi.encode(output);
+
+        uint256 claimFee = amountPerClaim * FeeOnTransferERC20(address(feeToken)).FEE_BPS() / 10000;
+        uint256 expectedReceived = amountPerClaim - claimFee;
+
+        vm.expectEmit(true, true, false, true);
+        emit AnonymousAirdrop.Claimed(nullifier, claimant, expectedReceived);
+
+        uint256 claimantBalanceBefore = feeToken.balanceOf(claimant);
+
+        vm.prank(claimant);
+        feeAirdrop.claim("", journal, nullifier);
+
+        assertEq(feeToken.balanceOf(claimant), claimantBalanceBefore + expectedReceived);
+        assertEq(feeAirdrop.totalClaimed(), expectedReceived);
+        assertEq(feeAirdrop.totalClaimants(), 1);
+    }
+
     function testCannotDoubleClaim() public {
         vm.prank(owner);
         airdrop.startClaims();
@@ -936,6 +998,7 @@ contract AnonymousAirdropDeadlineTest is Test {
         airdrop.withdrawAfterDeadline();
 
         assertTrue(airdrop.closed());
+        assertFalse(airdrop.claimsActive());
         assertEq(token.balanceOf(address(airdrop)), 0);
         assertEq(token.balanceOf(owner), ownerBalanceBefore + contractBalance);
     }
@@ -1041,6 +1104,20 @@ contract MockVerifier is IRiscZeroVerifier {
 contract ERC20Mock is ERC20 {
     constructor(string memory name, string memory symbol, address to, uint256 amount) ERC20(name, symbol) {
         _mint(to, amount);
+    }
+}
+
+contract FeeOnTransferERC20 is ERC20 {
+    uint256 public constant FEE_BPS = 100;
+
+    constructor(string memory name, string memory symbol, address to, uint256 amount) ERC20(name, symbol) {
+        _mint(to, amount);
+    }
+
+    function transfer(address to, uint256 amount) public override returns (bool) {
+        uint256 fee = amount * FEE_BPS / 10000;
+        _transfer(_msgSender(), to, amount - fee);
+        return true;
     }
 }
 

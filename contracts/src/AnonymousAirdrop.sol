@@ -143,9 +143,10 @@ contract AnonymousAirdrop is Ownable2Step, ReentrancyGuard {
 
         uint256 balanceBefore = token.balanceOf(address(this));
         token.safeTransfer(msg.sender, amountPerClaim);
-        totalClaimed += balanceBefore - token.balanceOf(address(this));
+        uint256 actualAmount = balanceBefore - token.balanceOf(address(this));
+        totalClaimed += actualAmount;
 
-        emit Claimed(expectedNullifier, address(output.claimantAddress), amountPerClaim);
+        emit Claimed(expectedNullifier, address(output.claimantAddress), actualAmount);
     }
 
     /// @notice Start the claims phase, allowing users to claim tokens
@@ -217,6 +218,7 @@ contract AnonymousAirdrop is Ownable2Step, ReentrancyGuard {
         uint256 balanceBefore = token.balanceOf(address(this));
         if (balanceBefore == 0) revert NoTokensToWithdraw();
         closed = true;
+        claimsActive = false;
         token.safeTransfer(to, balanceBefore);
         emit AirdropClosed();
         emit EmergencyWithdraw(to, balanceBefore - token.balanceOf(address(this)));
